@@ -360,12 +360,20 @@ async def cleanup_unwanted_files(
                         error_type="file_removal_error"
                     ).inc()
 
-        # Record metrics for found files
-        for file_path, pattern in pattern_matches.items():
-            cleanup_files_found_total.labels(
-                directory=cleanup_dir,
-                pattern=pattern
-            ).inc()
+        # Record metrics for found files or zero out if none found
+        if pattern_matches:
+            for file_path, pattern in pattern_matches.items():
+                cleanup_files_found_total.labels(
+                    directory=cleanup_dir,
+                    pattern=pattern
+                ).inc()
+        else:
+            # Zero out metrics for each pattern when no files are found
+            for pattern in patterns:
+                cleanup_files_found_total.labels(
+                    directory=cleanup_dir,
+                    pattern=pattern
+                ).inc(0)  # This sets the counter to 0 for this combination
 
         # Record operation duration
         operation_duration = time.time() - start_time
