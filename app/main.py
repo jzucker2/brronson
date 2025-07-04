@@ -15,6 +15,28 @@ def get_cleanup_directory():
     return os.getenv("CLEANUP_DIRECTORY", "/data")
 
 
+# Default patterns for common unwanted files
+DEFAULT_UNWANTED_PATTERNS = [
+    r"www\.YTS\.MX\.jpg$",
+    r"www\.YTS\.AM\.jpg$",
+    r"www\.YTS\.LT\.jpg$",
+    r"WWW\.YTS\.[A-Z]+\.jpg$",
+    r"WWW\.YIFY-TORRENTS\.COM\.jpg$",
+    r"YIFYStatus\.com\.txt$",
+    r"YTSProxies\.com\.txt$",
+    r"YTSYifyUP.*\(TOR\)\.txt$",
+    r"\.DS_Store$",
+    r"Thumbs\.db$",
+    r"desktop\.ini$",
+    r"\.tmp$",
+    r"\.temp$",
+    r"\.log$",
+    r"\.cache$",
+    r"\.bak$",
+    r"\.backup$",
+]
+
+
 # Custom Prometheus metrics for file cleanup operations
 cleanup_files_found_total = Counter(
     "bronson_cleanup_files_found_total",
@@ -76,6 +98,128 @@ bronson_info = Gauge(
     "Info about the server",
     ["version"]
 )
+
+
+def validate_directory(
+        directory_path: Path,
+        cleanup_dir: str,
+        operation_type: str = "scan",
+        ) -> None:
+    """
+    Shared helper method to validate directory for cleanup/scan operations.
+
+    Args:
+        directory_path: Path to the directory to validate
+        cleanup_dir: String representation of the cleanup directory for error messages  # noqa: E501
+        operation_type: Type of operation ("scan" or "cleanup") for metrics
+
+    Raises:
+        HTTPException: If directory validation fails
+    """
+    if not directory_path.exists():
+        if operation_type == "scan":
+            scan_errors_total.labels(
+                directory=cleanup_dir,
+                error_type="directory_not_found"
+            ).inc()
+        else:  # cleanup
+            cleanup_errors_total.labels(
+                directory=cleanup_dir,
+                error_type="directory_not_found"
+            ).inc()
+        raise HTTPException(
+            status_code=404,
+            detail=f"Configured cleanup directory {cleanup_dir} not found",
+        )
+
+    # Security check: prevent operations on critical system directories
+    critical_dirs = [
+        "/",
+        "/home",
+        "/usr",
+        "/etc",
+        "/var",
+        "/bin",
+        "/sbin",
+        "/boot",
+        "/root",
+    ]
+    dir_str = str(directory_path)
+    # Allow /tmp, /private/tmp, and /private/var and their subdirectories
+    allowed_tmp_paths = [
+        str(Path(p).resolve())
+        for p in ["/tmp", "/private/tmp", "/private/var"]
+    ]
+    if any(
+        dir_str == tmp_path or dir_str.startswith(tmp_path + "/")
+        for tmp_path in allowed_tmp_paths
+    ):
+        pass  # temp dirs are allowed
+    else:
+        for sys_dir in critical_dirs:
+            sys_dir_path = str(Path(sys_dir).resolve())
+            if dir_str == sys_dir_path or dir_str.startswith(
+                sys_dir_path + "/"
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Configured cleanup directory is in a protected "  # noqa: E501
+                    "system location",
+                )
+
+
+def find_unwanted_files(
+        directory_path: Path,
+        patterns: List[str],
+        operation_type: str = "scan",
+        ):
+    """
+    Shared helper method to find unwanted files in a directory.
+
+    Args:
+        directory_path: Path to the directory to scan
+        patterns: List of regex patterns to match unwanted files
+        operation_type: Type of operation ("scan" or "cleanup") for metrics
+
+    Returns:
+        tuple: (found_files, file_sizes, pattern_matches)
+    """
+    found_files = []
+    file_sizes = {}
+    pattern_matches = {}
+
+    # Walk through directory recursively
+    for root, dirs, files in os.walk(directory_path):
+        for file in files:
+            file_path = Path(root) / file
+
+            # Check if file matches any unwanted pattern
+            for pattern in patterns:
+                if re.search(pattern, file, re.IGNORECASE):
+                    found_files.append(str(file_path))
+                    pattern_matches[str(file_path)] = pattern
+
+                    try:
+                        file_size = file_path.stat().st_size
+                        file_sizes[str(file_path)] = file_size
+
+                        # Record file size metric based on operation type
+                        if operation_type == "scan":
+                            scan_directory_size_bytes.labels(
+                                directory=str(directory_path),
+                                pattern=pattern
+                            ).observe(file_size)
+                        else:  # cleanup
+                            cleanup_directory_size_bytes.labels(
+                                directory=str(directory_path),
+                                pattern=pattern
+                            ).observe(file_size)
+                    except Exception:
+                        file_sizes[str(file_path)] = 0
+                    break
+
+    return found_files, file_sizes, pattern_matches
+
 
 app = FastAPI(title="Bronson", version=version)
 
@@ -166,79 +310,12 @@ async def cleanup_unwanted_files(
     cleanup_dir = get_cleanup_directory()
 
     if patterns is None:
-        # Default patterns for common unwanted files
-        patterns = [
-            r"www\.YTS\.MX\.jpg$",
-            r"www\.YTS\.AM\.jpg$",
-            r"www\.YTS\.LT\.jpg$",
-            r"WWW\.YTS\.[A-Z]+\.jpg$",
-            r"WWW\.YIFY-TORRENTS\.COM\.jpg$",
-            r"YIFYStatus\.com\.txt$",
-            r"YTSProxies\.com\.txt$",
-            r"YTSYifyUP.*\(TOR\)\.txt$",
-            r"\.DS_Store$",
-            r"Thumbs\.db$",
-            r"desktop\.ini$",
-            r"\.tmp$",
-            r"\.temp$",
-            r"\.log$",
-            r"\.cache$",
-            r"\.bak$",
-            r"\.backup$",
-        ]
+        patterns = DEFAULT_UNWANTED_PATTERNS
 
     # Use the configured cleanup directory
     try:
         directory_path = Path(cleanup_dir).resolve()
-        if not directory_path.exists():
-            cleanup_errors_total.labels(
-                directory=cleanup_dir,
-                error_type="directory_not_found"
-            ).inc()
-            raise HTTPException(
-                status_code=404,
-                detail=f"Configured cleanup directory {cleanup_dir} not found",
-            )
-
-        # Security check: prevent deletion from critical system directories
-        critical_dirs = [
-            "/",
-            "/home",
-            "/usr",
-            "/etc",
-            "/var",
-            "/bin",
-            "/sbin",
-            "/boot",
-            "/root",
-        ]
-        dir_str = str(directory_path)
-        # Allow /tmp, /private/tmp, and /private/var and their subdirectories
-        allowed_tmp_paths = [
-            str(Path(p).resolve())
-            for p in ["/tmp", "/private/tmp", "/private/var"]
-        ]
-        if any(
-            dir_str == tmp_path or dir_str.startswith(tmp_path + "/")
-            for tmp_path in allowed_tmp_paths
-        ):
-            pass  # temp dirs are allowed
-        else:
-            for sys_dir in critical_dirs:
-                sys_dir_path = str(Path(sys_dir).resolve())
-                if dir_str == sys_dir_path or dir_str.startswith(
-                    sys_dir_path + "/"
-                ):
-                    cleanup_errors_total.labels(
-                        directory=cleanup_dir,
-                        error_type="protected_directory"
-                    ).inc()
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Configured cleanup directory is in a protected "  # noqa: E501
-                        "system location",
-                    )
-
+        validate_directory(directory_path, cleanup_dir, "cleanup")
     except Exception as e:  # noqa: E501
         cleanup_errors_total.labels(
             directory=cleanup_dir,
@@ -253,49 +330,35 @@ async def cleanup_unwanted_files(
             detail=msg
         )
 
-    found_files = []
-    removed_files = []
-    errors = []
-    pattern_matches = {}  # Track which patterns matched which files
-
     try:
-        # Walk through directory recursively
-        for root, dirs, files in os.walk(directory_path):
-            for file in files:
-                file_path = Path(root) / file
+        # Use shared helper to find unwanted files
+        found_files, file_sizes, pattern_matches = find_unwanted_files(
+            directory_path, patterns, "cleanup"
+        )
 
-                # Check if file matches any unwanted pattern
-                for pattern in patterns:
-                    if re.search(pattern, file, re.IGNORECASE):
-                        found_files.append(str(file_path))
-                        pattern_matches[str(file_path)] = pattern
+        removed_files = []
+        errors = []
 
-                        # Record file size metric
-                        try:
-                            file_size = file_path.stat().st_size
-                            cleanup_directory_size_bytes.labels(
-                                directory=cleanup_dir,
-                                pattern=pattern
-                            ).observe(file_size)
-                        except Exception:
-                            pass  # Ignore size measurement errors
+        # Process found files for removal
+        for file_path_str in found_files:
+            file_path = Path(file_path_str)
+            pattern = pattern_matches[file_path_str]
 
-                        if not dry_run:
-                            try:
-                                file_path.unlink()
-                                removed_files.append(str(file_path))
-                                cleanup_files_removed_total.labels(
-                                    directory=cleanup_dir,
-                                    pattern=pattern
-                                ).inc()
-                            except Exception as e:
-                                error_msg = f"Failed to remove {file_path}: {str(e)}"  # noqa: E501
-                                errors.append(error_msg)
-                                cleanup_errors_total.labels(
-                                    directory=cleanup_dir,
-                                    error_type="file_removal_error"
-                                ).inc()
-                        break
+            if not dry_run:
+                try:
+                    file_path.unlink()
+                    removed_files.append(file_path_str)
+                    cleanup_files_removed_total.labels(
+                        directory=cleanup_dir,
+                        pattern=pattern
+                    ).inc()
+                except Exception as e:
+                    error_msg = f"Failed to remove {file_path}: {str(e)}"  # noqa: E501
+                    errors.append(error_msg)
+                    cleanup_errors_total.labels(
+                        directory=cleanup_dir,
+                        error_type="file_removal_error"
+                    ).inc()
 
         # Record metrics for found files
         for file_path, pattern in pattern_matches.items():
@@ -344,72 +407,13 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
     start_time = time.time()
 
     if patterns is None:
-        # Default patterns for common unwanted files
-        patterns = [
-            r"www\.YTS\.MX\.jpg$",
-            r"www\.YTS\.AM\.jpg$",
-            r"www\.YTS\.LT\.jpg$",
-            r"WWW\.YTS\.[A-Z]+\.jpg$",
-            r"WWW\.YIFY-TORRENTS\.COM\.jpg$",
-            r"YIFYStatus\.com\.txt$",
-            r"YTSProxies\.com\.txt$",
-            r"YTSYifyUP.*\(TOR\)\.txt$",
-            r"\.DS_Store$",
-            r"Thumbs\.db$",
-            r"desktop\.ini$",
-            r"\.tmp$",
-            r"\.temp$",
-            r"\.log$",
-            r"\.cache$",
-            r"\.bak$",
-            r"\.backup$",
-        ]
+        patterns = DEFAULT_UNWANTED_PATTERNS
 
     # Use the configured cleanup directory
     cleanup_dir = get_cleanup_directory()
     try:
         directory_path = Path(cleanup_dir).resolve()
-        if not directory_path.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=f"Configured cleanup directory {cleanup_dir} not found",
-            )
-
-        # Security check: prevent scanning critical system directories
-        critical_dirs = [
-            "/",
-            "/home",
-            "/usr",
-            "/etc",
-            "/var",
-            "/bin",
-            "/sbin",
-            "/boot",
-            "/root",
-        ]
-        dir_str = str(directory_path)
-        # Allow /tmp, /private/tmp, and /private/var and their subdirectories
-        allowed_tmp_paths = [
-            str(Path(p).resolve())
-            for p in ["/tmp", "/private/tmp", "/private/var"]
-        ]
-        if any(
-            dir_str == tmp_path or dir_str.startswith(tmp_path + "/")
-            for tmp_path in allowed_tmp_paths
-        ):
-            pass  # temp dirs are allowed
-        else:
-            for sys_dir in critical_dirs:
-                sys_dir_path = str(Path(sys_dir).resolve())
-                if dir_str == sys_dir_path or dir_str.startswith(
-                    sys_dir_path + "/"
-                ):
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Configured cleanup directory is in a protected "  # noqa: E501
-                        "system location",
-                    )
-
+        validate_directory(directory_path, cleanup_dir, "scan")
     except Exception as e:  # noqa: E501
         scan_errors_total.labels(
             directory=cleanup_dir,
@@ -424,43 +428,28 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
             detail=msg
         )
 
-    found_files = []
-    file_sizes = {}
-    pattern_matches = {}
-
     try:
-        # Walk through directory recursively
-        for root, dirs, files in os.walk(directory_path):
-            for file in files:
-                file_path = Path(root) / file
-
-                # Check if file matches any unwanted pattern
-                for pattern in patterns:
-                    if re.search(pattern, file, re.IGNORECASE):
-                        found_files.append(str(file_path))
-                        pattern_matches[str(file_path)] = pattern
-
-                        try:
-                            file_size = file_path.stat().st_size
-                            file_sizes[str(file_path)] = file_size
-
-                            # Record file size metric
-                            scan_directory_size_bytes.labels(
-                                directory=cleanup_dir,
-                                pattern=pattern
-                            ).observe(file_size)
-                        except Exception:
-                            file_sizes[str(file_path)] = 0
-                        break
-
-        # Record metrics for found files
-        for file_path, pattern in pattern_matches.items():
-            scan_files_found_total.labels(
-                directory=cleanup_dir,
-                pattern=pattern
-            ).inc()
+        # Use shared helper to find unwanted files
+        found_files, file_sizes, pattern_matches = find_unwanted_files(
+            directory_path, patterns, "scan"
+        )
 
         total_size = sum(file_sizes.values())
+
+        # Record metrics for found files or zero out if none found
+        if pattern_matches:
+            for file_path, pattern in pattern_matches.items():
+                scan_files_found_total.labels(
+                    directory=cleanup_dir,
+                    pattern=pattern
+                ).inc()
+        else:
+            # Zero out metrics for each pattern when no files are found
+            for pattern in patterns:
+                scan_files_found_total.labels(
+                    directory=cleanup_dir,
+                    pattern=pattern
+                ).inc(0)  # This sets the counter to 0 for this combination
 
         # Record operation duration
         operation_duration = time.time() - start_time
