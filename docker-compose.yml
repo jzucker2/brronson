@@ -1,18 +1,12 @@
-version: '3.8'
-
 services:
-  app:
+  bronson:
+    container_name: bronson
     build: .
     ports:
       - "1968:1968"
     environment:
       - PROMETHEUS_MULTIPROC_DIR=/tmp
       - ENABLE_METRICS=true
-    volumes:
-      - ./tmp:/tmp
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:1968/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s 
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
