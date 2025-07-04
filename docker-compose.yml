@@ -1,12 +1,15 @@
 services:
   bronson:
     container_name: bronson
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "1968:1968"
     environment:
       - PROMETHEUS_MULTIPROC_DIR=/tmp
       - ENABLE_METRICS=true
+      - CLEANUP_DIRECTORY=/tmp
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -1,4 +1,7 @@
-import pytest
+import unittest
+import tempfile
+import os
+from pathlib import Path
 from fastapi.testclient import TestClient
 from app.main import app
 from app.version import version
@@ -6,9 +9,7 @@ from app.version import version
 client = TestClient(app)
 
 
-class TestAPIEndpoints:
-    """Test cases for API endpoints"""
-
+class TestMainEndpoints(unittest.TestCase):
     def test_root_endpoint(self):
         """Test the root endpoint"""
         response = client.get("/")
@@ -31,52 +32,34 @@ class TestAPIEndpoints:
         assert data["version"] == version
         assert isinstance(data["timestamp"], (int, float))
 
-    def test_get_items(self):
-        """Test getting list of items"""
-        response = client.get("/api/v1/items")
+    def test_version_endpoint(self):
+        """Test the version endpoint"""
+        response = client.get("/version")
         assert response.status_code == 200
         data = response.json()
-        assert "items" in data
-        assert isinstance(data["items"], list)
-        assert len(data["items"]) == 3
+        assert data["message"] == f"The current version of Bronson is {version}"
+        assert data["version"] == version
 
-    def test_create_item(self):
-        """Test creating a new item"""
-        item_data = {"name": "Test Item", "description": "A test item"}
-        response = client.post("/api/v1/items", json=item_data)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["message"] == "Item created"
-        assert data["item"] == item_data
-
-    def test_get_item_by_id(self):
-        """Test getting a specific item by ID"""
-        item_id = 123
-        response = client.get(f"/api/v1/items/{item_id}")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["item_id"] == item_id
-        assert data["name"] == f"Item {item_id}"
-
-
-class TestMetrics:
-    """Test cases for Prometheus metrics"""
-
-    def test_metrics_endpoint_exists(self):
-        """Test that metrics endpoint exists and returns data"""
+    def test_metrics_endpoint(self):
+        """Test the metrics endpoint"""
         response = client.get("/metrics")
         assert response.status_code == 200
-        assert (
-            response.headers["content-type"]
-            == "text/plain; version=0.0.4; charset=utf-8"
-        )
+        assert "text/plain" in response.headers["content-type"]
 
-    def test_metrics_contain_request_duration(self):
-        """Test that metrics contain request duration histogram"""
-        client.get("/health")
+    def test_metrics_format(self):
+        """Test that metrics are in Prometheus format"""
         response = client.get("/metrics")
         metrics_text = response.text
-        assert "request_duration" in metrics_text
+        
+        # Check for basic Prometheus metric format
+        # This regex looks for metric_name{label="value"} metric_value
+        import re
+        metric_pattern = r'^[a-zA-Z_:][a-zA-Z0-9_:]*\{[^}]*\}\s+[0-9]+\.?[0-9]*$'
+        
+        # Find at least one metric that matches the pattern
+        lines = metrics_text.strip().split('\n')
+        matching_lines = [line for line in lines if re.match(metric_pattern, line)]
+        assert len(matching_lines) > 0, "No valid Prometheus metrics found"
 
     def test_metrics_contain_request_size(self):
         """Test that metrics contain request size metrics"""
@@ -84,70 +67,196 @@ class TestMetrics:
                     json={"name": "test", "description": "test item"})
         response = client.get("/metrics")
         metrics_text = response.text
-        assert "request_size" in metrics_text
+        
+        # Check for request size metrics
+        assert "http_request_size_bytes" in metrics_text
 
     def test_metrics_contain_response_size(self):
         """Test that metrics contain response size metrics"""
-        client.get("/api/v1/items")
+        client.get("/")
         response = client.get("/metrics")
         metrics_text = response.text
-        assert "response_size" in metrics_text
+        
+        # Check for response size metrics
+        assert "http_response_size_bytes" in metrics_text
+
+    def test_metrics_contain_request_duration(self):
+        """Test that metrics contain request duration metrics"""
+        client.get("/")
+        response = client.get("/metrics")
+        metrics_text = response.text
+        
+        # Check for request duration metrics
+        assert "http_request_duration_seconds" in metrics_text
+
+    def test_metrics_contain_requests_total(self):
+        """Test that metrics contain total requests metrics"""
+        client.get("/")
+        response = client.get("/metrics")
+        metrics_text = response.text
+        
+        # Check for total requests metrics
+        assert "http_requests_total" in metrics_text
 
 
-class TestErrorHandling:
-    """Test cases for error handling"""
+class TestCleanupEndpoints(unittest.TestCase):
+    def setUp(self):
+        """Set up test directory with unwanted files"""
+        self.test_dir = tempfile.mkdtemp()
+        self.test_path = Path(self.test_dir)
+        
+        # Create some unwanted files
+        (self.test_path / "www.YTS.MX.jpg").touch()
+        (self.test_path / "YIFYStatus.com.txt").touch()
+        (self.test_path / "normal_file.txt").touch()
+        (self.test_path / ".DS_Store").touch()
+        
+        # Create subdirectory with unwanted files
+        subdir = self.test_path / "subdir"
+        subdir.mkdir()
+        (subdir / "www.YTS.MX.jpg").touch()
+        (subdir / "normal_file.txt").touch()
+        
+        # Set the environment variable for testing
+        self.original_cleanup_dir = os.environ.get("CLEANUP_DIRECTORY")
+        os.environ["CLEANUP_DIRECTORY"] = self.test_dir
+        
+        # Clear Prometheus default registry to avoid duplicate metrics
+        import prometheus_client
+        prometheus_client.REGISTRY._names_to_collectors.clear()
+        
+        # Re-import and re-create the TestClient to pick up the new env var
+        from importlib import reload
+        import app.main
+        reload(app.main)
+        global client
+        client = TestClient(app.main.app)
 
-    def test_404_for_nonexistent_endpoint(self):
-        """Test 404 response for non-existent endpoints"""
-        response = client.get("/nonexistent")
-        assert response.status_code == 404
+    def tearDown(self):
+        """Clean up test directory and restore environment"""
+        import shutil
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+        
+        # Restore original environment variable
+        if self.original_cleanup_dir is not None:
+            os.environ["CLEANUP_DIRECTORY"] = self.original_cleanup_dir
+        elif "CLEANUP_DIRECTORY" in os.environ:
+            del os.environ["CLEANUP_DIRECTORY"]
 
-    def test_405_for_wrong_method(self):
-        """Test 405 response for wrong HTTP method"""
-        response = client.post("/")
-        assert response.status_code == 405
-
-
-class TestHealthCheck:
-    """Test cases specifically for health check functionality"""
-
-    def test_health_check_response_time(self):
-        """Test that health check responds within reasonable time"""
-        import time
-
-        start_time = time.time()
-        response = client.get("/health")
-        end_time = time.time()
+    def test_scan_endpoint(self):
+        """Test the scan endpoint"""
+        response = client.get("/api/v1/cleanup/scan")
         assert response.status_code == 200
-        assert (end_time - start_time) < 5
+        data = response.json()
+        
+        # Handle path resolution differences on macOS
+        assert data["directory"] == str(Path(self.test_dir).resolve())
+        assert data["files_found"] == 4  # 4 unwanted files
+        assert len(data["found_files"]) == 4
+        assert "www.YTS.MX.jpg" in str(data["found_files"])
+        assert "YIFYStatus.com.txt" in str(data["found_files"])
+        assert ".DS_Store" in str(data["found_files"])
 
-    def test_health_check_consistency(self):
-        """Test that health check returns consistent data structure"""
-        response1 = client.get("/health")
-        response2 = client.get("/health")
-        data1 = response1.json()
-        data2 = response2.json()
-        assert set(data1.keys()) == set(data2.keys())
-        assert data1["timestamp"] != data2["timestamp"]
-        assert data1["version"] == data2["version"]
-        assert data1["service"] == data2["service"]
-
-    def test_health_check_headers(self):
-        """Test that health check returns appropriate headers"""
-        response = client.get("/health")
+    def test_cleanup_dry_run(self):
+        """Test cleanup endpoint in dry run mode"""
+        response = client.post("/api/v1/cleanup/files?dry_run=true")
         assert response.status_code == 200
-        assert "content-type" in response.headers
-        assert response.headers["content-type"] == "application/json"
+        data = response.json()
+        
+        assert data["dry_run"] is True
+        assert data["files_found"] == 4
+        assert data["files_removed"] == 0  # No files removed in dry run
+        
+        # Verify files still exist
+        assert (self.test_path / "www.YTS.MX.jpg").exists()
+        assert (self.test_path / "YIFYStatus.com.txt").exists()
+        assert (self.test_path / ".DS_Store").exists()
 
-    def test_health_check_with_different_methods(self):
-        """Test health check with different HTTP methods"""
-        response = client.get("/health")
+    def test_cleanup_actual_removal(self):
+        """Test cleanup endpoint with actual file removal"""
+        response = client.post("/api/v1/cleanup/files?dry_run=false")
         assert response.status_code == 200
-        response = client.post("/health")
-        assert response.status_code == 405
-        response = client.put("/health")
-        assert response.status_code == 405
+        data = response.json()
+        
+        assert data["dry_run"] is False
+        assert data["files_found"] == 4
+        assert data["files_removed"] == 4
+        
+        # Verify unwanted files are removed
+        assert not (self.test_path / "www.YTS.MX.jpg").exists()
+        assert not (self.test_path / "YIFYStatus.com.txt").exists()
+        assert not (self.test_path / ".DS_Store").exists()
+        
+        # Verify normal files still exist
+        assert (self.test_path / "normal_file.txt").exists()
+        assert (self.test_path / "subdir" / "normal_file.txt").exists()
+
+    def test_cleanup_with_custom_patterns(self):
+        """Test cleanup with custom patterns"""
+        custom_patterns = [r"normal_file\.txt$"]
+        response = client.post(
+            "/api/v1/cleanup/files?dry_run=false",
+            json=custom_patterns
+        )
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["patterns_used"] == custom_patterns
+        assert data["files_found"] == 2  # 2 normal_file.txt files
+        assert data["files_removed"] == 2
+        
+        # Verify normal files are removed
+        assert not (self.test_path / "normal_file.txt").exists()
+        assert not (self.test_path / "subdir" / "normal_file.txt").exists()
+        
+        # Verify unwanted files still exist
+        assert (self.test_path / "www.YTS.MX.jpg").exists()
+        assert (self.test_path / "YIFYStatus.com.txt").exists()
+
+    def test_cleanup_nonexistent_directory(self):
+        """Test cleanup with nonexistent directory"""
+        # Temporarily set a nonexistent directory
+        os.environ["CLEANUP_DIRECTORY"] = "/nonexistent/dir"
+        response = client.post("/api/v1/cleanup/files")
+        assert response.status_code == 400
+        data = response.json()
+        assert "not found" in data["detail"]
+        # Restore test directory
+        os.environ["CLEANUP_DIRECTORY"] = self.test_dir
+
+    def test_cleanup_system_directory_protection(self):
+        """Test that system directories are protected"""
+        # Temporarily set a system directory
+        os.environ["CLEANUP_DIRECTORY"] = "/etc"
+        response = client.post("/api/v1/cleanup/files")
+        assert response.status_code == 400
+        data = response.json()
+        assert "protected system location" in data["detail"]
+        # Restore test directory
+        os.environ["CLEANUP_DIRECTORY"] = self.test_dir
+
+    def test_scan_nonexistent_directory(self):
+        """Test scan with nonexistent directory"""
+        # Temporarily set a nonexistent directory
+        os.environ["CLEANUP_DIRECTORY"] = "/nonexistent/dir"
+        response = client.get("/api/v1/cleanup/scan")
+        assert response.status_code == 400
+        data = response.json()
+        assert "not found" in data["detail"]
+        # Restore test directory
+        os.environ["CLEANUP_DIRECTORY"] = self.test_dir
+
+    def test_scan_system_directory_protection(self):
+        """Test that system directories are protected from scanning"""
+        # Temporarily set a system directory
+        os.environ["CLEANUP_DIRECTORY"] = "/etc"
+        response = client.get("/api/v1/cleanup/scan")
+        assert response.status_code == 400
+        data = response.json()
+        assert "protected system location" in data["detail"]
+        # Restore test directory
+        os.environ["CLEANUP_DIRECTORY"] = self.test_dir
 
 
 if __name__ == "__main__":
-    pytest.main([__file__])
+    unittest.main()

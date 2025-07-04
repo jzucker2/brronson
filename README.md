@@ -71,6 +71,51 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 - `POST /api/v1/items` - Create a new item
 - `GET /api/v1/items/{item_id}` - Get a specific item by ID
 
+### File Cleanup Endpoints
+
+- `GET /api/v1/cleanup/scan` - Scan configured directory for unwanted files (dry run)
+- `POST /api/v1/cleanup/files` - Remove unwanted files from configured directory
+
+#### File Cleanup Usage
+
+The cleanup endpoints help remove unwanted files like:
+- `www.YTS.MX.jpg`
+- `YIFYStatus.com.txt`
+- `.DS_Store` (macOS)
+- `Thumbs.db` (Windows)
+- Temporary files (`.tmp`, `.temp`, `.log`, `.cache`, `.bak`, `.backup`)
+
+**Configuration:**
+The cleanup directory is controlled by the `CLEANUP_DIRECTORY` environment variable (default: `/tmp`).
+
+**Scan for unwanted files:**
+```bash
+curl "http://localhost:1968/api/v1/cleanup/scan"
+```
+
+**Remove unwanted files (dry run first):**
+```bash
+# Dry run to see what would be deleted
+curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=true"
+
+# Actually remove the files
+curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false"
+```
+
+**Use custom patterns:**
+```bash
+curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false" \
+  -H "Content-Type: application/json" \
+  -d '{"patterns": ["\\.mp4$", "\\.avi$"]}'
+```
+
+**Safety Features:**
+- Default `dry_run=true` prevents accidental deletions
+- Single directory controlled by environment variable for security
+- Critical system directories are protected
+- Recursive search through all subdirectories
+- Detailed response with file counts and error reporting
+
 ## Monitoring
 
 ### Health Check
@@ -155,6 +200,7 @@ bronson/
 
 - `PROMETHEUS_MULTIPROC_DIR` - Directory for Prometheus multiprocess metrics (set to `/tmp` in Docker)
 - `ENABLE_METRICS` - Set to `true` to enable Prometheus metrics collection (default: enabled)
+- `CLEANUP_DIRECTORY` - Directory to scan and clean for unwanted files (default: `/tmp`)
 
 ### Building Docker Image
 
