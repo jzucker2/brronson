@@ -45,7 +45,8 @@ async def root():
 @app.get("/version")
 async def get_version():
     """Version endpoint"""
-    return {"message": f"The current version of the Bronson is {version}", "version": version}
+    return {"message": f"The current version of the Bronson is {version}",
+            "version": version}
 
 
 @app.get("/health")

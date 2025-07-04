@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-
+from app.version import version
 
 client = TestClient(app)
 
@@ -14,8 +14,8 @@ class TestAPIEndpoints:
         response = client.get("/")
         assert response.status_code == 200
         data = response.json()
-        assert data["message"] == "Welcome to Bronson API"
-        assert data["version"] == "1.0.0"
+        assert data["message"] == "Welcome to Bronson"
+        assert data["version"] == version
 
     def test_health_check(self):
         """Test the health check endpoint"""
@@ -26,9 +26,9 @@ class TestAPIEndpoints:
         assert "service" in data
         assert "version" in data
         assert "timestamp" in data
-        assert data["service"] == "bronson-api"
+        assert data["service"] == "bronson"
         assert data["status"] == "healthy"
-        assert data["version"] == "1.0.0"
+        assert data["version"] == version
         assert isinstance(data["timestamp"], (int, float))
 
     def test_get_items(self):
