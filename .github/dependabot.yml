@@ -43,4 +43,4 @@ updates:
       # or is better to use `fastapi*`
       - dependency-name: "fastapi*"
       - dependency-name: "prometheus*"
-      - dependency-name: "fastapi-utils*"
+      - dependency-name: "uvicorn*"
