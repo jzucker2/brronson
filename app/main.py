@@ -144,27 +144,22 @@ def validate_directory(
         "/boot",
         "/root",
     ]
-    dir_str = str(directory_path)
-    # Allow /tmp, /private/tmp, and /private/var and their subdirectories
+    dir_str = str(directory_path.resolve())
     allowed_tmp_paths = [
         str(Path(p).resolve())
         for p in ["/tmp", "/private/tmp", "/private/var"]
     ]
-    if any(
+    # Only allow if in allowed tmp paths or their subdirectories
+    if not any(
         dir_str == tmp_path or dir_str.startswith(tmp_path + "/")
         for tmp_path in allowed_tmp_paths
     ):
-        pass  # temp dirs are allowed
-    else:
         for sys_dir in critical_dirs:
             sys_dir_path = str(Path(sys_dir).resolve())
-            if dir_str == sys_dir_path or dir_str.startswith(
-                sys_dir_path + "/"
-            ):
+            if dir_str == sys_dir_path or dir_str.startswith(sys_dir_path + "/"):  # noqa: E501
                 raise HTTPException(
                     status_code=400,
-                    detail="Configured cleanup directory is in a protected "  # noqa: E501
-                    "system location",
+                    detail="Configured cleanup directory is in a protected system location",  # noqa: E501
                 )
 
 

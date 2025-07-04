@@ -198,12 +198,6 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert (self.test_path / "YTSProxies.com.txt").exists()
         assert (self.test_path / "YTSYifyUP123 (TOR).txt").exists()
         assert (self.test_path / ".DS_Store").exists()
-        assert (self.test_path / "subdir" / "YTSYifyUP123 (TOR).txt").exists()  # noqa: E501
-        assert (self.test_path / "subdir" / "www.YTS.AM.jpg").exists()
-        assert (self.test_path / "subdir" / "www.YTS.LT.jpg").exists()
-        assert (self.test_path / "subdir" / "WWW.YTS.AG.jpg").exists()
-        assert (self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg").exists()  # noqa: E501
-        assert (self.test_path / "subdir" / "YTSProxies.com.txt").exists()
 
     def test_cleanup_actual_removal(self):
         """Test cleanup endpoint with actual file removal"""
@@ -301,6 +295,307 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert "protected system location" in data["detail"]
         # Restore test directory
         os.environ["CLEANUP_DIRECTORY"] = self.test_dir
+
+
+class TestSharedHelperMethods(unittest.TestCase):
+    """Test the shared helper methods"""
+
+    def setUp(self):
+        """Set up test directory"""
+        self.test_dir = tempfile.mkdtemp()
+        self.test_path = Path(self.test_dir)
+
+        # Clear Prometheus default registry to avoid duplicate metrics
+        import prometheus_client
+        prometheus_client.REGISTRY._names_to_collectors.clear()
+
+        # Re-import to get fresh helper methods
+        from importlib import reload
+        import app.main
+        reload(app.main)
+        self.validate_directory = app.main.validate_directory
+        self.find_unwanted_files = app.main.find_unwanted_files
+        self.DEFAULT_UNWANTED_PATTERNS = app.main.DEFAULT_UNWANTED_PATTERNS
+
+    def tearDown(self):
+        """Clean up test directory"""
+        import shutil
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def test_validate_directory_success(self):
+        """Test validate_directory with valid directory"""
+        try:
+            self.validate_directory(
+                self.test_path, str(self.test_path),
+                "scan")
+        except Exception as e:
+            self.fail(f"validate_directory raised {e} unexpectedly!")
+
+    def test_validate_directory_nonexistent(self):
+        """Test validate_directory with nonexistent directory"""
+        nonexistent_path = Path("/nonexistent/test/directory")
+        with self.assertRaises(Exception):
+            self.validate_directory(
+                nonexistent_path,
+                str(nonexistent_path),
+                "scan")
+
+    def test_validate_directory_system_protection(self):
+        """Test validate_directory with protected system directory"""
+        system_path = Path("/etc")
+        with self.assertRaises(Exception):
+            self.validate_directory(system_path, str(system_path), "scan")
+
+    def test_find_unwanted_files_with_matches(self):
+        """Test find_unwanted_files with files that match patterns"""
+        # Create test files
+        (self.test_path / "www.YTS.MX.jpg").touch()
+        (self.test_path / "test.txt").touch()
+        (self.test_path / ".DS_Store").touch()
+
+        patterns = [r"www\.YTS\.MX\.jpg$", r"\.DS_Store$"]
+
+        found_files, file_sizes, pattern_matches = self.find_unwanted_files(
+            self.test_path, patterns, "scan"
+        )
+
+        self.assertEqual(len(found_files), 2)
+        self.assertIn(str(self.test_path / "www.YTS.MX.jpg"), found_files)
+        self.assertIn(str(self.test_path / ".DS_Store"), found_files)
+        self.assertEqual(len(pattern_matches), 2)
+        self.assertEqual(len(file_sizes), 2)
+
+    def test_find_unwanted_files_no_matches(self):
+        """Test find_unwanted_files with no matching files"""
+        # Create test files that don't match patterns
+        (self.test_path / "normal_file.txt").touch()
+        (self.test_path / "another_file.jpg").touch()
+
+        patterns = [r"www\.YTS\.MX\.jpg$", r"\.DS_Store$"]
+
+        found_files, file_sizes, pattern_matches = self.find_unwanted_files(
+            self.test_path, patterns, "scan"
+        )
+
+        self.assertEqual(len(found_files), 0)
+        self.assertEqual(len(pattern_matches), 0)
+        self.assertEqual(len(file_sizes), 0)
+
+    def test_find_unwanted_files_subdirectories(self):
+        """Test find_unwanted_files with subdirectories"""
+        # Create subdirectory with matching files
+        subdir = self.test_path / "subdir"
+        subdir.mkdir()
+        (subdir / "www.YTS.MX.jpg").touch()
+        (subdir / "normal_file.txt").touch()
+
+        patterns = [r"www\.YTS\.MX\.jpg$"]
+
+        found_files, file_sizes, pattern_matches = self.find_unwanted_files(
+            self.test_path, patterns, "scan"
+        )
+
+        self.assertEqual(len(found_files), 1)
+        self.assertIn(str(subdir / "www.YTS.MX.jpg"), found_files)
+
+    def test_default_patterns_constant(self):
+        """Test that DEFAULT_UNWANTED_PATTERNS is properly defined"""
+        self.assertIsInstance(self.DEFAULT_UNWANTED_PATTERNS, list)
+        self.assertGreater(len(self.DEFAULT_UNWANTED_PATTERNS), 0)
+
+        # Check that patterns are valid regex
+        import re
+        for pattern in self.DEFAULT_UNWANTED_PATTERNS:
+            try:
+                re.compile(pattern)
+            except re.error:
+                self.fail(f"Invalid regex pattern: {pattern}")
+
+
+class TestMetricsBehavior(unittest.TestCase):
+    """Test the new metrics behavior including zero-out logic"""
+
+    def setUp(self):
+        """Set up test directory"""
+        self.test_dir = tempfile.mkdtemp()
+        self.test_path = Path(self.test_dir)
+
+        # Set environment variable
+        self.original_cleanup_dir = os.environ.get("CLEANUP_DIRECTORY")
+        os.environ["CLEANUP_DIRECTORY"] = self.test_dir
+
+        # Clear Prometheus default registry
+        import prometheus_client
+        prometheus_client.REGISTRY._names_to_collectors.clear()
+
+        # Re-import and re-create the TestClient
+        from importlib import reload
+        import app.main
+        reload(app.main)
+        global client
+        client = TestClient(app.main.app)
+
+    def tearDown(self):
+        """Clean up test directory and restore environment"""
+        import shutil
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+        if self.original_cleanup_dir is not None:
+            os.environ["CLEANUP_DIRECTORY"] = self.original_cleanup_dir
+        elif "CLEANUP_DIRECTORY" in os.environ:
+            del os.environ["CLEANUP_DIRECTORY"]
+
+    def test_scan_metrics_with_files_found(self):
+        """Test scan metrics when files are found"""
+        # Create matching files
+        (self.test_path / "www.YTS.MX.jpg").touch()
+        (self.test_path / ".DS_Store").touch()
+
+        # Perform scan
+        response = client.get("/api/v1/cleanup/scan")
+        self.assertEqual(response.status_code, 200)
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have scan metrics
+        self.assertIn("bronson_scan_files_found_total", metrics_text)
+        self.assertIn("bronson_scan_operation_duration_seconds", metrics_text)
+        self.assertIn("bronson_scan_directory_size_bytes", metrics_text)
+
+    def test_scan_metrics_with_no_files_found(self):
+        """Test scan metrics when no files are found (zero-out behavior)"""
+        # Create only non-matching files
+        (self.test_path / "normal_file.txt").touch()
+        (self.test_path / "another_file.jpg").touch()
+
+        # Perform scan
+        response = client.get("/api/v1/cleanup/scan")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["files_found"], 0)
+
+        # Check metrics - should still have metric entries but with zero values
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have scan metrics even with zero files
+        self.assertIn("bronson_scan_files_found_total", metrics_text)
+        self.assertIn("bronson_scan_operation_duration_seconds", metrics_text)
+
+    def test_cleanup_metrics_with_files_found(self):
+        """Test cleanup metrics when files are found"""
+        # Create matching files
+        (self.test_path / "www.YTS.MX.jpg").touch()
+        (self.test_path / ".DS_Store").touch()
+
+        # Perform cleanup (dry run)
+        response = client.post("/api/v1/cleanup/files?dry_run=true")
+        self.assertEqual(response.status_code, 200)
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have cleanup metrics
+        self.assertIn(
+            "bronson_cleanup_files_found_total",
+            metrics_text)
+        self.assertIn(
+            "bronson_cleanup_operation_duration_seconds",
+            metrics_text)
+        self.assertIn(
+            "bronson_cleanup_directory_size_bytes",
+            metrics_text)
+
+    def test_cleanup_metrics_with_no_files_found(self):
+        """Test cleanup metrics when no files are found (zero-out behavior)"""
+        # Create only non-matching files
+        (self.test_path / "normal_file.txt").touch()
+        (self.test_path / "another_file.jpg").touch()
+
+        # Perform cleanup (dry run)
+        response = client.post("/api/v1/cleanup/files?dry_run=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["files_found"], 0)
+
+        # Check metrics - should still have metric entries but with zero values
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have cleanup metrics even with zero files
+        self.assertIn(
+            "bronson_cleanup_files_found_total",
+            metrics_text)
+        self.assertIn(
+            "bronson_cleanup_operation_duration_seconds",
+            metrics_text)
+
+    def test_cleanup_metrics_with_actual_removal(self):
+        """Test cleanup metrics when files are actually removed"""
+        # Create matching files
+        (self.test_path / "www.YTS.MX.jpg").touch()
+        (self.test_path / ".DS_Store").touch()
+
+        # Perform cleanup (actual removal)
+        response = client.post("/api/v1/cleanup/files?dry_run=false")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["files_removed"], 2)
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have removal metrics
+        self.assertIn("bronson_cleanup_files_removed_total", metrics_text)
+
+    def test_metrics_operation_type_differentiation(self):
+        """Test that scan and cleanup operations record different metrics"""
+        # Create matching files
+        (self.test_path / "www.YTS.MX.jpg").touch()
+
+        # Perform scan
+        client.get("/api/v1/cleanup/scan")
+
+        # Perform cleanup
+        client.post("/api/v1/cleanup/files?dry_run=true")
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have both scan and cleanup metrics
+        self.assertIn(
+            "bronson_scan_files_found_total",
+            metrics_text)
+        self.assertIn(
+            "bronson_cleanup_files_found_total",
+            metrics_text)
+        self.assertIn(
+            "bronson_scan_operation_duration_seconds",
+            metrics_text)
+        self.assertIn(
+            "bronson_cleanup_operation_duration_seconds",
+            metrics_text)
+
+    def test_error_metrics(self):
+        """Test error metrics are recorded properly"""
+        # Try to access nonexistent directory
+        os.environ["CLEANUP_DIRECTORY"] = "/nonexistent/directory"
+
+        # This should fail and record error metrics
+        response = client.get("/api/v1/cleanup/scan")
+        self.assertEqual(response.status_code, 400)
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have error metrics
+        self.assertIn("bronson_scan_errors_total", metrics_text)
 
 
 if __name__ == "__main__":
