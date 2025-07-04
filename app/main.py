@@ -1,28 +1,7 @@
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-from prometheus_client import CollectorRegistry, multiprocess
+from prometheus_fastapi_instrumentator import Instrumentator, metrics
 import time
-import os
-
-# Create a custom registry for multiprocess support
-registry = CollectorRegistry()
-multiprocess.MultiProcessCollector(registry)
-
-# Prometheus metrics
-REQUEST_COUNT = Counter(
-    'http_requests_total',
-    'Total HTTP requests',
-    ['method', 'endpoint', 'status'],
-    registry=registry
-)
-
-REQUEST_LATENCY = Histogram(
-    'http_request_duration_seconds',
-    'HTTP request latency',
-    ['method', 'endpoint'],
-    registry=registry
-)
 
 app = FastAPI(title="Bronson API", version="1.0.0")
 
@@ -35,26 +14,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.middleware("http")
-async def prometheus_middleware(request: Request, call_next):
-    start_time = time.time()
-    
-    response = await call_next(request)
-    
-    # Record metrics
-    duration = time.time() - start_time
-    REQUEST_COUNT.labels(
-        method=request.method,
-        endpoint=request.url.path,
-        status=response.status_code
-    ).inc()
-    
-    REQUEST_LATENCY.labels(
-        method=request.method,
-        endpoint=request.url.path
-    ).observe(duration)
-    
-    return response
+# Create Prometheus instrumentator
+instrumentator = Instrumentator(
+    should_group_status_codes=False,
+    should_ignore_untemplated=True,
+    should_respect_env_var=True,
+    should_instrument_requests_inprogress=True,
+    excluded_handlers=[".*admin.*", "/metrics"],
+    env_var_name="ENABLE_METRICS",
+    inprogress_name="http_requests_inprogress",
+    inprogress_labels=True,
+    custom_labels={"service": "bronson-api"}
+)
+
+# Add default metrics
+instrumentator.add(metrics.latency(buckets=(0.1, 0.5, 1.0, 2.0, 5.0)))
+instrumentator.add(metrics.request_size())
+instrumentator.add(metrics.response_size())
+instrumentator.add(metrics.requests_total())
+
+@app.on_event("startup")
+async def startup():
+    """Startup event to instrument the FastAPI app"""
+    instrumentator.instrument(app).expose(app, include_in_schema=False, should_gzip=True)
 
 @app.get("/")
 async def root():
@@ -64,12 +46,12 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "bronson-api"}
-
-@app.get("/metrics")
-async def metrics():
-    """Prometheus metrics endpoint"""
-    return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
+    return {
+        "status": "healthy",
+        "service": "bronson-api",
+        "version": "1.0.0",
+        "timestamp": time.time()
+    }
 
 @app.get("/api/v1/items")
 async def get_items():
@@ -88,4 +70,4 @@ async def get_item(item_id: int):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    uvicorn.run(app, host="0.0.0.0", port=1968) 

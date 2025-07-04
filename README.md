@@ -26,9 +26,9 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
    ```
 
 2. **Access the services**:
-   - FastAPI App: http://localhost:8000
-   - API Documentation: http://localhost:8000/docs
-   - Prometheus Metrics: http://localhost:8000/metrics
+   - FastAPI App: http://localhost:1968
+   - API Documentation: http://localhost:1968/docs
+   - Prometheus Metrics: http://localhost:1968/metrics
 
 3. **Stop the services**:
    ```bash
@@ -44,7 +44,7 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 
 2. **Run the application**:
    ```bash
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 1968
    ```
 
 3. **Run tests**:
@@ -62,7 +62,7 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 ### Core Endpoints
 
 - `GET /` - Root endpoint with API information
-- `GET /health` - Health check endpoint
+- `GET /health` - Health check endpoint with system metrics
 - `GET /metrics` - Prometheus metrics endpoint
 
 ### API v1 Endpoints
@@ -73,16 +73,29 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 
 ## Monitoring
 
+### Health Check
+
+The application provides a simple health check endpoint at `/health` that includes:
+
+- Service status (always "healthy" when the service is running)
+- Service name and version
+- Timestamp of the health check
+
 ### Prometheus Metrics
 
-The application exposes the following Prometheus metrics:
+The application uses [prometheus-fastapi-instrumentator](https://github.com/trallnag/prometheus-fastapi-instrumentator) to automatically collect and expose the following Prometheus metrics:
 
-- `http_requests_total` - Total HTTP requests with method, endpoint, and status labels
-- `http_request_duration_seconds` - HTTP request latency with method and endpoint labels
+- `requests_total` - Total HTTP requests with method, handler, and status labels
+- `request_duration_seconds` - HTTP request latency with method and handler labels
+- `request_size_bytes` - Size of incoming requests
+- `response_size_bytes` - Size of outgoing responses
+- `http_requests_inprogress` - Number of requests currently being processed
+
+The metrics endpoint is automatically exposed at `/metrics` and supports gzip compression for efficient data transfer.
 
 ### Viewing Metrics
 
-You can view the Prometheus metrics directly at http://localhost:8000/metrics or use any Prometheus-compatible monitoring system to scrape this endpoint.
+You can view the Prometheus metrics directly at http://localhost:1968/metrics or use any Prometheus-compatible monitoring system to scrape this endpoint.
 
 ## Testing
 
@@ -141,11 +154,27 @@ bronson/
 ### Environment Variables
 
 - `PROMETHEUS_MULTIPROC_DIR` - Directory for Prometheus multiprocess metrics (set to `/tmp` in Docker)
+- `ENABLE_METRICS` - Set to `true` to enable Prometheus metrics collection (default: enabled)
 
 ### Building Docker Image
 
 ```bash
 docker build -t bronson-api .
+```
+
+### Docker Health Checks
+
+The Docker image includes built-in health checks that:
+
+- Run every 30 seconds
+- Check the `/health` endpoint
+- Consider the container healthy if the health check passes
+- Retry up to 3 times before marking as unhealthy
+
+You can check the health status with:
+```bash
+docker ps  # Shows health status
+docker inspect <container_id>  # Shows detailed health check info
 ```
 
 ### Running Individual Services

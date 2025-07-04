@@ -8,7 +8,7 @@ build: ## Build the Docker image
 	docker build -t bronson-api .
 
 run: ## Run the application locally
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	uvicorn app.main:app --reload --host 0.0.0.0 --port 1968
 
 test: ## Run tests
 	pytest -v
