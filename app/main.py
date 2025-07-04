@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator, metrics
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Histogram, Gauge
 import time
 import os
 import re
@@ -46,6 +46,37 @@ cleanup_directory_size_bytes = Histogram(
     ["directory", "pattern"]
 )
 
+# Custom Prometheus metrics for file scan operations
+scan_files_found_total = Counter(
+    "bronson_scan_files_found_total",
+    "Total number of unwanted files found during scan",
+    ["directory", "pattern"]
+)
+
+scan_errors_total = Counter(
+    "bronson_scan_errors_total",
+    "Total number of errors during file scan",
+    ["directory", "error_type"]
+)
+
+scan_operation_duration = Histogram(
+    "bronson_scan_operation_duration_seconds",
+    "Time spent on scan operations",
+    ["operation_type", "directory"]
+)
+
+scan_directory_size_bytes = Histogram(
+    "bronson_scan_directory_size_bytes",
+    "Size of files found during scan",
+    ["directory", "pattern"]
+)
+
+bronson_info = Gauge(
+    "bronson_info",
+    "Info about the server",
+    ["version"]
+)
+
 app = FastAPI(title="Bronson", version=version)
 
 # Add CORS middleware
@@ -72,6 +103,8 @@ instrumentator.add(metrics.latency())
 instrumentator.instrument(app).expose(
     app, include_in_schema=False, should_gzip=True
 )
+
+bronson_info.labels(version=version).set(1)
 
 
 @app.get("/")
@@ -308,6 +341,8 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
     Args:
         patterns: List of regex patterns to match unwanted files
     """
+    start_time = time.time()
+
     if patterns is None:
         # Default patterns for common unwanted files
         patterns = [
@@ -376,6 +411,10 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
                     )
 
     except Exception as e:  # noqa: E501
+        scan_errors_total.labels(
+            directory=cleanup_dir,
+            error_type="directory_error"
+        ).inc()
         msg = (
             "Invalid cleanup directory: "
             f"{str(e)}"
@@ -387,6 +426,7 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
 
     found_files = []
     file_sizes = {}
+    pattern_matches = {}
 
     try:
         # Walk through directory recursively
@@ -398,15 +438,36 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
                 for pattern in patterns:
                     if re.search(pattern, file, re.IGNORECASE):
                         found_files.append(str(file_path))
+                        pattern_matches[str(file_path)] = pattern
+
                         try:
-                            file_sizes[str(file_path)] = (
-                                file_path.stat().st_size
-                            )
+                            file_size = file_path.stat().st_size
+                            file_sizes[str(file_path)] = file_size
+
+                            # Record file size metric
+                            scan_directory_size_bytes.labels(
+                                directory=cleanup_dir,
+                                pattern=pattern
+                            ).observe(file_size)
                         except Exception:
                             file_sizes[str(file_path)] = 0
                         break
 
+        # Record metrics for found files
+        for file_path, pattern in pattern_matches.items():
+            scan_files_found_total.labels(
+                directory=cleanup_dir,
+                pattern=pattern
+            ).inc()
+
         total_size = sum(file_sizes.values())
+
+        # Record operation duration
+        operation_duration = time.time() - start_time
+        scan_operation_duration.labels(
+            operation_type="scan",
+            directory=cleanup_dir
+        ).observe(operation_duration)
 
         return {
             "directory": str(directory_path),
@@ -419,6 +480,10 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
         }
 
     except Exception as e:
+        scan_errors_total.labels(
+            directory=cleanup_dir,
+            error_type="operation_error"
+        ).inc()
         raise HTTPException(
             status_code=500, detail=f"Error during scan: {str(e)}"
         )
