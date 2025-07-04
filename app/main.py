@@ -17,31 +17,31 @@ def get_cleanup_directory():
 
 # Custom Prometheus metrics for file cleanup operations
 cleanup_files_found_total = Counter(
-    "cleanup_files_found_total",
+    "bronson_cleanup_files_found_total",
     "Total number of unwanted files found during cleanup",
     ["directory", "pattern"]
 )
 
 cleanup_files_removed_total = Counter(
-    "cleanup_files_removed_total",
+    "bronson_cleanup_files_removed_total",
     "Total number of files successfully removed during cleanup",
     ["directory", "pattern"]
 )
 
 cleanup_errors_total = Counter(
-    "cleanup_errors_total",
+    "bronson_cleanup_errors_total",
     "Total number of errors during file cleanup",
     ["directory", "error_type"]
 )
 
 cleanup_operation_duration = Histogram(
-    "cleanup_operation_duration_seconds",
+    "bronson_cleanup_operation_duration_seconds",
     "Time spent on cleanup operations",
     ["operation_type", "directory"]
 )
 
 cleanup_directory_size_bytes = Histogram(
-    "cleanup_directory_size_bytes",
+    "bronson_cleanup_directory_size_bytes",
     "Size of files found during cleanup",
     ["directory", "pattern"]
 )
@@ -136,7 +136,13 @@ async def cleanup_unwanted_files(
         # Default patterns for common unwanted files
         patterns = [
             r"www\.YTS\.MX\.jpg$",
+            r"www\.YTS\.AM\.jpg$",
+            r"www\.YTS\.LT\.jpg$",
+            r"WWW\.YTS\.[A-Z]+\.jpg$",
+            r"WWW\.YIFY-TORRENTS\.COM\.jpg$",
             r"YIFYStatus\.com\.txt$",
+            r"YTSProxies\.com\.txt$",
+            r"YTSYifyUP.*\(TOR\)\.txt$",
             r"\.DS_Store$",
             r"Thumbs\.db$",
             r"desktop\.ini$",
@@ -306,7 +312,13 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
         # Default patterns for common unwanted files
         patterns = [
             r"www\.YTS\.MX\.jpg$",
+            r"www\.YTS\.AM\.jpg$",
+            r"www\.YTS\.LT\.jpg$",
+            r"WWW\.YTS\.[A-Z]+\.jpg$",
+            r"WWW\.YIFY-TORRENTS\.COM\.jpg$",
             r"YIFYStatus\.com\.txt$",
+            r"YTSProxies\.com\.txt$",
+            r"YTSYifyUP.*\(TOR\)\.txt$",
             r"\.DS_Store$",
             r"Thumbs\.db$",
             r"desktop\.ini$",
