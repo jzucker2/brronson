@@ -49,7 +49,7 @@ test-docker: ## Run tests in Docker container
 	docker run --rm bronson pytest
 
 format: ## Format code with black
-	black app/ tests/
+	black app/ tests/ --max-line-length=79
 
 lint: ## Lint code with flake8
 	flake8 app/ tests/
