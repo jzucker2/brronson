@@ -5,8 +5,8 @@ Dockerfile
 .gitignore
 .dockerignore
 
-wargos/app/app.db
-wargos/tests/
+bronson/app/app.db
+bronson/tests/
 
 /node_modules
 *.DS_Store
