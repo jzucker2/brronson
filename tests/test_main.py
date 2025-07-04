@@ -202,7 +202,7 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert (self.test_path / "subdir" / "www.YTS.AM.jpg").exists()
         assert (self.test_path / "subdir" / "www.YTS.LT.jpg").exists()
         assert (self.test_path / "subdir" / "WWW.YTS.AG.jpg").exists()
-        assert (self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg").exists()
+        assert (self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg").exists()  # noqa: E501
         assert (self.test_path / "subdir" / "YTSProxies.com.txt").exists()
 
     def test_cleanup_actual_removal(self):
@@ -229,7 +229,7 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert not (self.test_path / "subdir" / "www.YTS.AM.jpg").exists()
         assert not (self.test_path / "subdir" / "www.YTS.LT.jpg").exists()
         assert not (self.test_path / "subdir" / "WWW.YTS.AG.jpg").exists()
-        assert not (self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg").exists()
+        assert not (self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg").exists()  # noqa: E501
         assert not (self.test_path / "subdir" / "YTSProxies.com.txt").exists()
 
         # Verify normal files still exist
