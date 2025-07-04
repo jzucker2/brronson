@@ -31,9 +31,7 @@ instrumentator = Instrumentator(
 instrumentator.add(metrics.latency(buckets=(0.1, 0.5, 1.0, 2.0, 5.0)))
 instrumentator.add(metrics.request_size())
 instrumentator.add(metrics.response_size())
-instrumentator.instrument(app).expose(
-    app, include_in_schema=False, should_gzip=True
-)
+instrumentator.instrument(app).expose(app, include_in_schema=False, should_gzip=True)
 
 
 @app.get("/")
@@ -73,4 +71,5 @@ async def get_item(item_id: int):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=1968)

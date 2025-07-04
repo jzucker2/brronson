@@ -80,9 +80,7 @@ class TestMetrics:
 
     def test_metrics_contain_request_size(self):
         """Test that metrics contain request size metrics"""
-        client.post(
-            "/api/v1/items", json={"name": "test", "description": "test item"}
-        )
+        client.post("/api/v1/items", json={"name": "test", "description": "test item"})
         response = client.get("/metrics")
         metrics_text = response.text
         assert "request_size" in metrics_text
@@ -115,6 +113,7 @@ class TestHealthCheck:
     def test_health_check_response_time(self):
         """Test that health check responds within reasonable time"""
         import time
+
         start_time = time.time()
         response = client.get("/health")
         end_time = time.time()

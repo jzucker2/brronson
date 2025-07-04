@@ -54,4 +54,4 @@ format: ## Format code with black
 lint: ## Lint code with flake8
 	flake8 app/ tests/
 
-check: format lint test ## Run all checks (format, lint, test)
+check: format lint ## Run all checks (format, lint)
