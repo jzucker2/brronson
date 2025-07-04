@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator, metrics
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Histogram, Gauge
 import time
 import os
 import re
@@ -46,6 +46,12 @@ cleanup_directory_size_bytes = Histogram(
     ["directory", "pattern"]
 )
 
+bronson_info = Gauge(
+    "bronson_info",
+    "Info about the server",
+    ["version"]
+)
+
 app = FastAPI(title="Bronson", version=version)
 
 # Add CORS middleware
@@ -72,6 +78,8 @@ instrumentator.add(metrics.latency())
 instrumentator.instrument(app).expose(
     app, include_in_schema=False, should_gzip=True
 )
+
+bronson_info.labels(version=version).set(1)
 
 
 @app.get("/")
