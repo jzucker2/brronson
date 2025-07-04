@@ -24,7 +24,7 @@ instrumentator = Instrumentator(
     env_var_name="ENABLE_METRICS",
     inprogress_name="http_requests_inprogress",
     inprogress_labels=True,
-    custom_labels={"service": "bronson-api"}
+    custom_labels={"service": "bronson-api"},
 )
 
 # Add default metrics
@@ -33,15 +33,20 @@ instrumentator.add(metrics.request_size())
 instrumentator.add(metrics.response_size())
 instrumentator.add(metrics.requests_total())
 
+
 @app.on_event("startup")
 async def startup():
     """Startup event to instrument the FastAPI app"""
-    instrumentator.instrument(app).expose(app, include_in_schema=False, should_gzip=True)
+    instrumentator.instrument(app).expose(
+        app, include_in_schema=False, should_gzip=True
+    )
+
 
 @app.get("/")
 async def root():
     """Root endpoint"""
     return {"message": "Welcome to Bronson API", "version": "1.0.0"}
+
 
 @app.get("/health")
 async def health_check():
@@ -50,24 +55,28 @@ async def health_check():
         "status": "healthy",
         "service": "bronson-api",
         "version": "1.0.0",
-        "timestamp": time.time()
+        "timestamp": time.time(),
     }
+
 
 @app.get("/api/v1/items")
 async def get_items():
     """Get list of items"""
     return {"items": ["item1", "item2", "item3"]}
 
+
 @app.post("/api/v1/items")
 async def create_item(item: dict):
     """Create a new item"""
     return {"message": "Item created", "item": item}
+
 
 @app.get("/api/v1/items/{item_id}")
 async def get_item(item_id: int):
     """Get a specific item by ID"""
     return {"item_id": item_id, "name": f"Item {item_id}"}
 
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=1968) 
+    uvicorn.run(app, host="0.0.0.0", port=1968)

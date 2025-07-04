@@ -55,6 +55,3 @@ lint: ## Lint code with flake8
 	flake8 app/ tests/
 
 check: format lint test ## Run all checks (format, lint, test)
-
-pip install -r requirements-dev.txt
-pytest 
