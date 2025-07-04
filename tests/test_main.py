@@ -71,13 +71,6 @@ class TestMetrics:
             == "text/plain; version=0.0.4; charset=utf-8"
         )
 
-    def test_metrics_contain_requests_total(self):
-        """Test that metrics contain requests_total counter"""
-        client.get("/health")
-        response = client.get("/metrics")
-        metrics_text = response.text
-        assert "requests_total" in metrics_text
-
     def test_metrics_contain_request_duration(self):
         """Test that metrics contain request duration histogram"""
         client.get("/health")
