@@ -12,7 +12,7 @@ from .version import version
 
 def get_cleanup_directory():
     """Get the cleanup directory from environment variable"""
-    return os.getenv("CLEANUP_DIRECTORY", "/tmp")
+    return os.getenv("CLEANUP_DIRECTORY", "/data")
 
 
 # Custom Prometheus metrics for file cleanup operations
