@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator, metrics
+from prometheus_client import Counter, Histogram
 import time
 import os
 import re
@@ -11,8 +12,39 @@ from .version import version
 
 def get_cleanup_directory():
     """Get the cleanup directory from environment variable"""
-    return os.getenv("CLEANUP_DIRECTORY", "/data")
+    return os.getenv("CLEANUP_DIRECTORY", "/tmp")
 
+
+# Custom Prometheus metrics for file cleanup operations
+cleanup_files_found_total = Counter(
+    "cleanup_files_found_total",
+    "Total number of unwanted files found during cleanup",
+    ["directory", "pattern"]
+)
+
+cleanup_files_removed_total = Counter(
+    "cleanup_files_removed_total",
+    "Total number of files successfully removed during cleanup",
+    ["directory", "pattern"]
+)
+
+cleanup_errors_total = Counter(
+    "cleanup_errors_total",
+    "Total number of errors during file cleanup",
+    ["directory", "error_type"]
+)
+
+cleanup_operation_duration = Histogram(
+    "cleanup_operation_duration_seconds",
+    "Time spent on cleanup operations",
+    ["operation_type", "directory"]
+)
+
+cleanup_directory_size_bytes = Histogram(
+    "cleanup_directory_size_bytes",
+    "Size of files found during cleanup",
+    ["directory", "pattern"]
+)
 
 app = FastAPI(title="Bronson", version=version)
 
@@ -97,6 +129,9 @@ async def cleanup_unwanted_files(
         dry_run: If True, only show what would be deleted (default: True)
         patterns: List of regex patterns to match unwanted files
     """
+    start_time = time.time()
+    cleanup_dir = get_cleanup_directory()
+
     if patterns is None:
         # Default patterns for common unwanted files
         patterns = [
@@ -114,10 +149,13 @@ async def cleanup_unwanted_files(
         ]
 
     # Use the configured cleanup directory
-    cleanup_dir = get_cleanup_directory()
     try:
         directory_path = Path(cleanup_dir).resolve()
         if not directory_path.exists():
+            cleanup_errors_total.labels(
+                directory=cleanup_dir,
+                error_type="directory_not_found"
+            ).inc()
             raise HTTPException(
                 status_code=404,
                 detail=f"Configured cleanup directory {cleanup_dir} not found",
@@ -152,6 +190,10 @@ async def cleanup_unwanted_files(
                 if dir_str == sys_dir_path or dir_str.startswith(
                     sys_dir_path + "/"
                 ):
+                    cleanup_errors_total.labels(
+                        directory=cleanup_dir,
+                        error_type="protected_directory"
+                    ).inc()
                     raise HTTPException(
                         status_code=400,
                         detail="Configured cleanup directory is in a protected "  # noqa: E501
@@ -159,6 +201,10 @@ async def cleanup_unwanted_files(
                     )
 
     except Exception as e:  # noqa: E501
+        cleanup_errors_total.labels(
+            directory=cleanup_dir,
+            error_type="validation_error"
+        ).inc()
         msg = (
             "Invalid cleanup directory: "
             f"{str(e)}"
@@ -171,6 +217,7 @@ async def cleanup_unwanted_files(
     found_files = []
     removed_files = []
     errors = []
+    pattern_matches = {}  # Track which patterns matched which files
 
     try:
         # Walk through directory recursively
@@ -182,16 +229,48 @@ async def cleanup_unwanted_files(
                 for pattern in patterns:
                     if re.search(pattern, file, re.IGNORECASE):
                         found_files.append(str(file_path))
+                        pattern_matches[str(file_path)] = pattern
+
+                        # Record file size metric
+                        try:
+                            file_size = file_path.stat().st_size
+                            cleanup_directory_size_bytes.labels(
+                                directory=cleanup_dir,
+                                pattern=pattern
+                            ).observe(file_size)
+                        except Exception:
+                            pass  # Ignore size measurement errors
 
                         if not dry_run:
                             try:
                                 file_path.unlink()
                                 removed_files.append(str(file_path))
+                                cleanup_files_removed_total.labels(
+                                    directory=cleanup_dir,
+                                    pattern=pattern
+                                ).inc()
                             except Exception as e:
-                                errors.append(
-                                    f"Failed to remove {file_path}: {str(e)}"
-                                )
+                                error_msg = f"Failed to remove {file_path}: {str(e)}"  # noqa: E501
+                                errors.append(error_msg)
+                                cleanup_errors_total.labels(
+                                    directory=cleanup_dir,
+                                    error_type="file_removal_error"
+                                ).inc()
                         break
+
+        # Record metrics for found files
+        for file_path, pattern in pattern_matches.items():
+            cleanup_files_found_total.labels(
+                directory=cleanup_dir,
+                pattern=pattern
+            ).inc()
+
+        # Record operation duration
+        operation_duration = time.time() - start_time
+        cleanup_operation_duration.labels(
+            operation_type="cleanup",
+            directory=cleanup_dir
+        ).observe(operation_duration)
 
         return {
             "directory": str(directory_path),
@@ -206,6 +285,10 @@ async def cleanup_unwanted_files(
         }
 
     except Exception as e:
+        cleanup_errors_total.labels(
+            directory=cleanup_dir,
+            error_type="operation_error"
+        ).inc()
         raise HTTPException(
             status_code=500, detail=f"Error during cleanup: {str(e)}"
         )
