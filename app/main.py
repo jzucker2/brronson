@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator, metrics
 import time
+from .version import version
 
 app = FastAPI(title="Bronson API", version="1.0.0")
 
@@ -38,7 +39,13 @@ instrumentator.instrument(app).expose(
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {"message": "Welcome to Bronson API", "version": "1.0.0"}
+    return {"message": "Welcome to Bronson", "version": version}
+
+
+@app.get("/version")
+async def version():
+    """Version endpoint"""
+    return {"message": f"The current version of the Bronson is {version}", "version": version}
 
 
 @app.get("/health")
@@ -46,8 +53,8 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "service": "bronson-api",
-        "version": "1.0.0",
+        "service": "bronson",
+        "version": version,
         "timestamp": time.time(),
     }
 
