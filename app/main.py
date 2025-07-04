@@ -137,6 +137,7 @@ async def cleanup_unwanted_files(
         patterns = [
             r"www\.YTS\.MX\.jpg$",
             r"www\.YTS\.AM\.jpg$",
+            r"www\.YTS\.LT\.jpg$",
             r"YIFYStatus\.com\.txt$",
             r"YTSYifyUP.*\(TOR\)\.txt$",
             r"\.DS_Store$",
@@ -309,6 +310,7 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
         patterns = [
             r"www\.YTS\.MX\.jpg$",
             r"www\.YTS\.AM\.jpg$",
+            r"www\.YTS\.LT\.jpg$",
             r"YIFYStatus\.com\.txt$",
             r"YTSYifyUP.*\(TOR\)\.txt$",
             r"\.DS_Store$",
