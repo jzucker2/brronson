@@ -88,15 +88,15 @@ class TestMainEndpoints(unittest.TestCase):
         # Check for response size metrics
         assert "http_response_size_bytes" in metrics_text
 
-    # def test_metrics_contain_request_duration(self):
-    #     """Test that metrics contain request duration metrics"""
-    #     client.get("/")
-    #     response = client.get("/metrics")
-    #     metrics_text = response.text
-    #     print(metrics_text)
+    def test_metrics_contain_request_duration(self):
+        """Test that metrics contain request duration metrics"""
+        client.get("/")
+        response = client.get("/metrics")
+        metrics_text = response.text
+        print(metrics_text)
 
-    #     # Check for request duration metrics
-    #     assert "http_request_duration_seconds" in metrics_text
+        # Check for request duration metrics
+        assert "http_request_duration_seconds" in metrics_text
 
 
 class TestCleanupEndpoints(unittest.TestCase):

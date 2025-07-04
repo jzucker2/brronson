@@ -27,8 +27,8 @@ app.add_middleware(
 
 # Configure Prometheus metrics
 instrumentator = Instrumentator(
-    # should_group_status_codes=False,
-    # should_ignore_untemplated=True,
+    should_group_status_codes=False,
+    should_ignore_untemplated=True,
     should_respect_env_var=False,  # Disable env var requirement for testing
     should_instrument_requests_inprogress=True,
     excluded_handlers=[".*admin.*", "/metrics"],
@@ -36,6 +36,7 @@ instrumentator = Instrumentator(
 
 instrumentator.add(metrics.request_size())
 instrumentator.add(metrics.response_size())
+instrumentator.add(metrics.latency())
 instrumentator.instrument(app).expose(
     app, include_in_schema=False, should_gzip=True
 )
