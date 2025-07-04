@@ -24,7 +24,6 @@ instrumentator = Instrumentator(
     env_var_name="ENABLE_METRICS",
     inprogress_name="http_requests_inprogress",
     inprogress_labels=True,
-    custom_labels={"service": "bronson-api"},
 )
 
 # Add default metrics
