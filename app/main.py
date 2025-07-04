@@ -4,7 +4,7 @@ from prometheus_fastapi_instrumentator import Instrumentator, metrics
 import time
 from .version import version
 
-app = FastAPI(title="Bronson API", version="1.0.0")
+app = FastAPI(title="Bronson", version=version)
 
 
 # Add CORS middleware
@@ -43,7 +43,7 @@ async def root():
 
 
 @app.get("/version")
-async def version():
+async def get_version():
     """Version endpoint"""
     return {"message": f"The current version of the Bronson is {version}", "version": version}
 
