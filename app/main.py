@@ -6,7 +6,6 @@ import time
 app = FastAPI(title="Bronson API", version="1.0.0")
 
 
-
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +19,7 @@ app.add_middleware(
 instrumentator = Instrumentator(
     should_group_status_codes=False,
     should_ignore_untemplated=True,
-    should_respect_env_var=True,
+    should_respect_env_var=False,  # Disable env var requirement for testing
     should_instrument_requests_inprogress=True,
     excluded_handlers=[".*admin.*", "/metrics"],
     env_var_name="ENABLE_METRICS",
@@ -29,9 +28,9 @@ instrumentator = Instrumentator(
 )
 
 # Add default metrics
-# instrumentator.add(metrics.latency(buckets=(0.1, 0.5, 1.0, 2.0, 5.0)))
-# instrumentator.add(metrics.request_size())
-# instrumentator.add(metrics.response_size())
+instrumentator.add(metrics.latency(buckets=(0.1, 0.5, 1.0, 2.0, 5.0)))
+instrumentator.add(metrics.request_size())
+instrumentator.add(metrics.response_size())
 instrumentator.instrument(app).expose(
     app, include_in_schema=False, should_gzip=True
 )
