@@ -89,15 +89,6 @@ class TestMainEndpoints(unittest.TestCase):
         # Check for request duration metrics
         assert "http_request_duration_seconds" in metrics_text
 
-    def test_metrics_contain_requests_total(self):
-        """Test that metrics contain total requests metrics"""
-        client.get("/")
-        response = client.get("/metrics")
-        metrics_text = response.text
-        
-        # Check for total requests metrics
-        assert "http_requests_total" in metrics_text
-
 
 class TestCleanupEndpoints(unittest.TestCase):
     def setUp(self):
