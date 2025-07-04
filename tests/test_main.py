@@ -109,7 +109,10 @@ class TestCleanupEndpoints(unittest.TestCase):
         (self.test_path / "www.YTS.MX.jpg").touch()
         (self.test_path / "www.YTS.AM.jpg").touch()
         (self.test_path / "www.YTS.LT.jpg").touch()
+        (self.test_path / "WWW.YTS.AG.jpg").touch()
+        (self.test_path / "WWW.YIFY-TORRENTS.COM.jpg").touch()
         (self.test_path / "YIFYStatus.com.txt").touch()
+        (self.test_path / "YTSProxies.com.txt").touch()
         (self.test_path / "YTSYifyUP123 (TOR).txt").touch()
         (self.test_path / "normal_file.txt").touch()
         (self.test_path / ".DS_Store").touch()
@@ -120,6 +123,9 @@ class TestCleanupEndpoints(unittest.TestCase):
         (subdir / "www.YTS.MX.jpg").touch()
         (subdir / "www.YTS.AM.jpg").touch()
         (subdir / "www.YTS.LT.jpg").touch()
+        (subdir / "WWW.YTS.AG.jpg").touch()
+        (subdir / "WWW.YIFY-TORRENTS.COM.jpg").touch()
+        (subdir / "YTSProxies.com.txt").touch()
         (subdir / "YTSYifyUP123 (TOR).txt").touch()
         (subdir / "normal_file.txt").touch()
 
@@ -160,12 +166,15 @@ class TestCleanupEndpoints(unittest.TestCase):
 
         # Handle path resolution differences on macOS
         assert data["directory"] == str(Path(self.test_dir).resolve())
-        assert data["files_found"] == 10  # 10 unwanted files
-        assert len(data["found_files"]) == 10
+        assert data["files_found"] == 16  # 16 unwanted files
+        assert len(data["found_files"]) == 16
         assert "www.YTS.MX.jpg" in str(data["found_files"])
         assert "www.YTS.AM.jpg" in str(data["found_files"])
         assert "www.YTS.LT.jpg" in str(data["found_files"])
+        assert "WWW.YTS.AG.jpg" in str(data["found_files"])
+        assert "WWW.YIFY-TORRENTS.COM.jpg" in str(data["found_files"])
         assert "YIFYStatus.com.txt" in str(data["found_files"])
+        assert "YTSProxies.com.txt" in str(data["found_files"])
         assert ".DS_Store" in str(data["found_files"])
         assert "YTSYifyUP123 (TOR).txt" in str(data["found_files"])
 
@@ -176,19 +185,25 @@ class TestCleanupEndpoints(unittest.TestCase):
         data = response.json()
 
         assert data["dry_run"] is True
-        assert data["files_found"] == 10
+        assert data["files_found"] == 16
         assert data["files_removed"] == 0  # No files removed in dry run
 
         # Verify files still exist
         assert (self.test_path / "www.YTS.MX.jpg").exists()
         assert (self.test_path / "www.YTS.AM.jpg").exists()
         assert (self.test_path / "www.YTS.LT.jpg").exists()
+        assert (self.test_path / "WWW.YTS.AG.jpg").exists()
+        assert (self.test_path / "WWW.YIFY-TORRENTS.COM.jpg").exists()
         assert (self.test_path / "YIFYStatus.com.txt").exists()
+        assert (self.test_path / "YTSProxies.com.txt").exists()
         assert (self.test_path / "YTSYifyUP123 (TOR).txt").exists()
         assert (self.test_path / ".DS_Store").exists()
-        assert (self.test_path / "subdir" / "YTSYifyUP123 (TOR).txt").exists()
+        assert (self.test_path / "subdir" / "YTSYifyUP123 (TOR).txt").exists()  # noqa: E501
         assert (self.test_path / "subdir" / "www.YTS.AM.jpg").exists()
         assert (self.test_path / "subdir" / "www.YTS.LT.jpg").exists()
+        assert (self.test_path / "subdir" / "WWW.YTS.AG.jpg").exists()
+        assert (self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg").exists()
+        assert (self.test_path / "subdir" / "YTSProxies.com.txt").exists()
 
     def test_cleanup_actual_removal(self):
         """Test cleanup endpoint with actual file removal"""
@@ -197,19 +212,25 @@ class TestCleanupEndpoints(unittest.TestCase):
         data = response.json()
 
         assert data["dry_run"] is False
-        assert data["files_found"] == 10
-        assert data["files_removed"] == 10
+        assert data["files_found"] == 16
+        assert data["files_removed"] == 16
 
         # Verify unwanted files are removed
         assert not (self.test_path / "www.YTS.MX.jpg").exists()
         assert not (self.test_path / "www.YTS.AM.jpg").exists()
         assert not (self.test_path / "www.YTS.LT.jpg").exists()
+        assert not (self.test_path / "WWW.YTS.AG.jpg").exists()
+        assert not (self.test_path / "WWW.YIFY-TORRENTS.COM.jpg").exists()
         assert not (self.test_path / "YIFYStatus.com.txt").exists()
+        assert not (self.test_path / "YTSProxies.com.txt").exists()
         assert not (self.test_path / "YTSYifyUP123 (TOR).txt").exists()
         assert not (self.test_path / ".DS_Store").exists()
         assert not (self.test_path / "subdir" / "YTSYifyUP123 (TOR).txt").exists()  # noqa: E501
         assert not (self.test_path / "subdir" / "www.YTS.AM.jpg").exists()
         assert not (self.test_path / "subdir" / "www.YTS.LT.jpg").exists()
+        assert not (self.test_path / "subdir" / "WWW.YTS.AG.jpg").exists()
+        assert not (self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg").exists()
+        assert not (self.test_path / "subdir" / "YTSProxies.com.txt").exists()
 
         # Verify normal files still exist
         assert (self.test_path / "normal_file.txt").exists()
