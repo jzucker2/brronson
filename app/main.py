@@ -45,7 +45,7 @@ async def root():
 @app.get("/version")
 async def get_version():
     """Version endpoint"""
-    return {"message": f"The current version of the Bronson is {version}",
+    return {"message": f"The current version of Bronson is {version}",
             "version": version}
 
 
