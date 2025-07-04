@@ -80,7 +80,8 @@ class TestMetrics:
 
     def test_metrics_contain_request_size(self):
         """Test that metrics contain request size metrics"""
-        client.post("/api/v1/items", json={"name": "test", "description": "test item"})
+        client.post("/api/v1/items",
+                    json={"name": "test", "description": "test item"})
         response = client.get("/metrics")
         metrics_text = response.text
         assert "request_size" in metrics_text
