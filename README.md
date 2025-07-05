@@ -75,6 +75,7 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 - `GET /api/v1/items` - Get list of items
 - `POST /api/v1/items` - Create a new item
 - `GET /api/v1/items/{item_id}` - Get a specific item by ID
+- `GET /api/v1/compare/directories` - Compare subdirectories between directories
 
 ### File Cleanup Endpoints
 
@@ -125,6 +126,49 @@ curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false" \
 - Critical system directories are protected
 - Recursive search through all subdirectories
 - Detailed response with file counts and error reporting
+
+### Directory Comparison Endpoints
+
+- `GET /api/v1/compare/directories` - Compare subdirectories between CLEANUP_DIRECTORY and TARGET_DIRECTORY
+
+#### Directory Comparison Usage
+
+The directory comparison endpoint helps identify duplicate subdirectories between two configured directories.
+
+**Configuration:**
+
+- `CLEANUP_DIRECTORY` - First directory to scan for subdirectories (default: `/tmp`)
+- `TARGET_DIRECTORY` - Second directory to scan for subdirectories (default: `/tmp`)
+
+**Compare directories:**
+
+```bash
+curl "http://localhost:1968/api/v1/compare/directories"
+```
+
+**Response format:**
+
+```json
+{
+  "cleanup_directory": "/path/to/cleanup",
+  "target_directory": "/path/to/target",
+  "cleanup_subdirectories": ["dir1", "dir2", "dir3"],
+  "target_subdirectories": ["dir2", "dir4", "dir5"],
+  "duplicates": ["dir2"],
+  "duplicate_count": 1,
+  "total_cleanup_subdirectories": 3,
+  "total_target_subdirectories": 3
+}
+```
+
+**Features:**
+
+- Compares only subdirectories (ignores files)
+- Returns lists of all subdirectories from both directories
+- Identifies duplicates that exist in both directories
+- Provides counts for monitoring and analysis
+- Safe operation - read-only, no modifications
+- Detailed response with comprehensive directory information
 
 ## Monitoring
 
@@ -253,6 +297,7 @@ bronson/
 - `PROMETHEUS_MULTIPROC_DIR` - Directory for Prometheus multiprocess metrics (set to `/tmp` in Docker)
 - `ENABLE_METRICS` - Set to `true` to enable Prometheus metrics collection (default: enabled)
 - `CLEANUP_DIRECTORY` - Directory to scan and clean for unwanted files (default: `/tmp`)
+- `TARGET_DIRECTORY` - Directory to compare with CLEANUP_DIRECTORY for duplicates (default: `/tmp`)
 
 ### Building Docker Image
 
