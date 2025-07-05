@@ -684,12 +684,35 @@ class TestDirectoryComparison(unittest.TestCase):
             del os.environ["TARGET_DIRECTORY"]
 
     def test_compare_directories_success(self):
-        """Test successful directory comparison"""
+        """Test successful directory comparison (default non-verbose)"""
         response = client.get("/api/v1/compare/directories")
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
-        # Check response structure
+        # Check response structure (non-verbose should not include full lists)
+        self.assertIn("cleanup_directory", data)
+        self.assertIn("target_directory", data)
+        self.assertNotIn("cleanup_subdirectories", data)
+        self.assertNotIn("target_subdirectories", data)
+        self.assertIn("duplicates", data)
+        self.assertIn("duplicate_count", data)
+        self.assertIn("total_cleanup_subdirectories", data)
+        self.assertIn("total_target_subdirectories", data)
+
+        # Check expected results
+        self.assertEqual(data["duplicate_count"], 2)
+        self.assertIn("shared_dir1", data["duplicates"])
+        self.assertIn("shared_dir2", data["duplicates"])
+        self.assertEqual(data["total_cleanup_subdirectories"], 3)
+        self.assertEqual(data["total_target_subdirectories"], 3)
+
+    def test_compare_directories_verbose(self):
+        """Test successful directory comparison with verbose flag"""
+        response = client.get("/api/v1/compare/directories?verbose=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check response structure (verbose should include full lists)
         self.assertIn("cleanup_directory", data)
         self.assertIn("target_directory", data)
         self.assertIn("cleanup_subdirectories", data)
@@ -705,6 +728,8 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertIn("shared_dir2", data["duplicates"])
         self.assertEqual(data["total_cleanup_subdirectories"], 3)
         self.assertEqual(data["total_target_subdirectories"], 3)
+        self.assertIn("cleanup_only", data["cleanup_subdirectories"])
+        self.assertIn("target_only", data["target_subdirectories"])
 
     def test_compare_directories_no_duplicates(self):
         """Test directory comparison with no duplicates"""
@@ -740,8 +765,8 @@ class TestDirectoryComparison(unittest.TestCase):
         data = response.json()
 
         self.assertEqual(data["duplicate_count"], 0)
-        self.assertEqual(len(data["cleanup_subdirectories"]), 0)
-        self.assertEqual(len(data["target_subdirectories"]), 0)
+        self.assertEqual(data["total_cleanup_subdirectories"], 0)
+        self.assertEqual(data["total_target_subdirectories"], 0)
 
     def test_compare_directories_nonexistent_cleanup(self):
         """Test directory comparison with nonexistent cleanup directory"""
@@ -784,7 +809,8 @@ class TestDirectoryComparison(unittest.TestCase):
         (self.target_dir / "test_file.txt").touch()
         (self.cleanup_dir / "another_file.jpg").touch()
 
-        response = client.get("/api/v1/compare/directories")
+        # Test with verbose flag to get the full lists
+        response = client.get("/api/v1/compare/directories?verbose=true")
         self.assertEqual(response.status_code, 200)
         data = response.json()
 

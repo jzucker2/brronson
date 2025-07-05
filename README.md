@@ -140,13 +140,32 @@ The directory comparison endpoint helps identify duplicate subdirectories betwee
 - `CLEANUP_DIRECTORY` - First directory to scan for subdirectories (default: `/tmp`)
 - `TARGET_DIRECTORY` - Second directory to scan for subdirectories (default: `/tmp`)
 
-**Compare directories:**
+**Compare directories (default - counts only):**
 
 ```bash
 curl "http://localhost:1968/api/v1/compare/directories"
 ```
 
-**Response format:**
+**Compare directories with verbose output:**
+
+```bash
+curl "http://localhost:1968/api/v1/compare/directories?verbose=true"
+```
+
+**Response format (default):**
+
+```json
+{
+  "cleanup_directory": "/path/to/cleanup",
+  "target_directory": "/path/to/target",
+  "duplicates": ["dir2"],
+  "duplicate_count": 1,
+  "total_cleanup_subdirectories": 3,
+  "total_target_subdirectories": 3
+}
+```
+
+**Response format (verbose):**
 
 ```json
 {

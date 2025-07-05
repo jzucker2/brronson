@@ -525,10 +525,13 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
 
 
 @app.get("/api/v1/compare/directories")
-async def compare_directories():
+async def compare_directories(verbose: bool = False):
     """
     Compare subdirectories of CLEANUP_DIRECTORY with subdirectories of
      TARGET_DIRECTORY and count duplicates that exist in both.
+
+    Args:
+        verbose: If True, include full lists of subdirectories in response
     """
     start_time = time.time()
 
@@ -565,16 +568,21 @@ async def compare_directories():
             target_directory=target_dir,
         ).observe(operation_duration)
 
-        return {
+        response = {
             "cleanup_directory": str(cleanup_path),
             "target_directory": str(target_path),
-            "cleanup_subdirectories": cleanup_subdirs,
-            "target_subdirectories": target_subdirs,
             "duplicates": duplicates,
             "duplicate_count": len(duplicates),
             "total_cleanup_subdirectories": len(cleanup_subdirs),
             "total_target_subdirectories": len(target_subdirs),
         }
+
+        # Include full lists only if verbose is True
+        if verbose:
+            response["cleanup_subdirectories"] = cleanup_subdirs
+            response["target_subdirectories"] = target_subdirs
+
+        return response
 
     except HTTPException:
         # Re-raise HTTPExceptions (like 404 for missing directories) as-is
