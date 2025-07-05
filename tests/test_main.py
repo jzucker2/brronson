@@ -1,8 +1,10 @@
-import unittest
-import tempfile
 import os
+import tempfile
+import unittest
 from pathlib import Path
+
 from fastapi.testclient import TestClient
+
 from app.main import app
 from app.version import version
 
@@ -140,6 +142,7 @@ class TestCleanupEndpoints(unittest.TestCase):
 
         # Re-import and re-create the TestClient to pick up the new env var
         from importlib import reload
+
         import app.main
 
         reload(app.main)
@@ -316,6 +319,7 @@ class TestSharedHelperMethods(unittest.TestCase):
 
         # Re-import to get fresh helper methods
         from importlib import reload
+
         import app.main
 
         reload(app.main)
@@ -462,6 +466,7 @@ class TestMetricsBehavior(unittest.TestCase):
 
         # Re-import and re-create the TestClient
         from importlib import reload
+
         import app.main
 
         reload(app.main)
@@ -655,6 +660,7 @@ class TestDirectoryComparison(unittest.TestCase):
 
         # Re-import and re-create the TestClient
         from importlib import reload
+
         import app.main
 
         reload(app.main)
@@ -688,17 +694,17 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertIn("target_directory", data)
         self.assertIn("cleanup_subdirectories", data)
         self.assertIn("target_subdirectories", data)
-        self.assertIn("duplicate_count", data)
         self.assertIn("duplicates", data)
-        self.assertIn("cleanup_only", data)
-        self.assertIn("target_only", data)
+        self.assertIn("duplicate_count", data)
+        self.assertIn("total_cleanup_subdirectories", data)
+        self.assertIn("total_target_subdirectories", data)
 
         # Check expected results
         self.assertEqual(data["duplicate_count"], 2)
         self.assertIn("shared_dir1", data["duplicates"])
         self.assertIn("shared_dir2", data["duplicates"])
-        self.assertIn("cleanup_only", data["cleanup_only"])
-        self.assertIn("target_only", data["target_only"])
+        self.assertEqual(data["total_cleanup_subdirectories"], 3)
+        self.assertEqual(data["total_target_subdirectories"], 3)
 
     def test_compare_directories_no_duplicates(self):
         """Test directory comparison with no duplicates"""
@@ -767,8 +773,8 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertIn(
             "bronson_comparison_operation_duration_seconds", metrics_text
         )
-        # Should have subdirectory metrics
-        self.assertIn("bronson_subdirectories_found_total", metrics_text)
+        # Should NOT have subdirectory metrics for comparison operations
+        # (only duplicates are counted, not all subdirectories)
 
     def test_compare_directories_with_files(self):
         """Test that directory comparison

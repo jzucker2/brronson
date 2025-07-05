@@ -1,12 +1,14 @@
-from fastapi import FastAPI, HTTPException, Body
-from fastapi.middleware.cors import CORSMiddleware
-from prometheus_fastapi_instrumentator import Instrumentator, metrics
-from prometheus_client import Counter, Histogram, Gauge
-import time
 import os
 import re
+import time
 from pathlib import Path
 from typing import List, Optional
+
+from fastapi import Body, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import Counter, Gauge, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator, metrics
+
 from .version import version
 
 
@@ -266,10 +268,11 @@ def get_subdirectories(
     except Exception:
         pass  # Return empty list if directory doesn't exist or can't be read
 
-    # Record metric for subdirectories found
-    subdirectories_found_total.labels(
-        directory=str(directory_path), operation_type=operation_type
-    ).inc(len(subdirectories))
+    # Record metric for subdirectories found (but not for comparison operations)
+    if operation_type != "comparison":
+        subdirectories_found_total.labels(
+            directory=str(directory_path), operation_type=operation_type
+        ).inc(len(subdirectories))
 
     return subdirectories
 
@@ -549,7 +552,7 @@ async def compare_directories():
         target_set = set(target_subdirs)
         duplicates = list(cleanup_set.intersection(target_set))
 
-        # Record metrics
+        # Record metrics - only count duplicates, not all subdirectories
         comparison_duplicates_found_total.labels(
             cleanup_directory=cleanup_dir, target_directory=target_dir
         ).inc(len(duplicates))
@@ -567,10 +570,10 @@ async def compare_directories():
             "target_directory": str(target_path),
             "cleanup_subdirectories": cleanup_subdirs,
             "target_subdirectories": target_subdirs,
-            "duplicate_count": len(duplicates),
             "duplicates": duplicates,
-            "cleanup_only": list(cleanup_set - target_set),
-            "target_only": list(target_set - cleanup_set),
+            "duplicate_count": len(duplicates),
+            "total_cleanup_subdirectories": len(cleanup_subdirs),
+            "total_target_subdirectories": len(target_subdirs),
         }
 
     except HTTPException:
