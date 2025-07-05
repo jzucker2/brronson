@@ -1,18 +1,25 @@
-from fastapi import FastAPI, HTTPException, Body
-from fastapi.middleware.cors import CORSMiddleware
-from prometheus_fastapi_instrumentator import Instrumentator, metrics
-from prometheus_client import Counter, Histogram, Gauge
-import time
 import os
 import re
+import time
 from pathlib import Path
 from typing import List, Optional
+
+from fastapi import Body, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import Counter, Gauge, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator, metrics
+
 from .version import version
 
 
 def get_cleanup_directory():
     """Get the cleanup directory from environment variable"""
     return os.getenv("CLEANUP_DIRECTORY", "/data")
+
+
+def get_target_directory():
+    """Get the target directory from environment variable"""
+    return os.getenv("TARGET_DIRECTORY", "/target")
 
 
 # Default patterns for common unwanted files
@@ -41,70 +48,104 @@ DEFAULT_UNWANTED_PATTERNS = [
 cleanup_files_found_total = Counter(
     "bronson_cleanup_files_found_total",
     "Total number of unwanted files found during cleanup",
-    ["directory", "pattern"]
+    ["directory", "pattern"],
+)
+
+cleanup_current_files = Gauge(
+    "bronson_cleanup_current_files",
+    "Current number of unwanted files in directory",
+    ["directory", "pattern"],
 )
 
 cleanup_files_removed_total = Counter(
     "bronson_cleanup_files_removed_total",
     "Total number of files successfully removed during cleanup",
-    ["directory", "pattern"]
+    ["directory", "pattern"],
 )
 
 cleanup_errors_total = Counter(
     "bronson_cleanup_errors_total",
     "Total number of errors during file cleanup",
-    ["directory", "error_type"]
+    ["directory", "error_type"],
 )
 
 cleanup_operation_duration = Histogram(
     "bronson_cleanup_operation_duration_seconds",
     "Time spent on cleanup operations",
-    ["operation_type", "directory"]
+    ["operation_type", "directory"],
 )
 
 cleanup_directory_size_bytes = Histogram(
     "bronson_cleanup_directory_size_bytes",
     "Size of files found during cleanup",
-    ["directory", "pattern"]
+    ["directory", "pattern"],
 )
 
 # Custom Prometheus metrics for file scan operations
 scan_files_found_total = Counter(
     "bronson_scan_files_found_total",
     "Total number of unwanted files found during scan",
-    ["directory", "pattern"]
+    ["directory", "pattern"],
+)
+
+scan_current_files = Gauge(
+    "bronson_scan_current_files",
+    "Current number of unwanted files in directory",
+    ["directory", "pattern"],
 )
 
 scan_errors_total = Counter(
     "bronson_scan_errors_total",
     "Total number of errors during file scan",
-    ["directory", "error_type"]
+    ["directory", "error_type"],
 )
 
 scan_operation_duration = Histogram(
     "bronson_scan_operation_duration_seconds",
     "Time spent on scan operations",
-    ["operation_type", "directory"]
+    ["operation_type", "directory"],
 )
 
 scan_directory_size_bytes = Histogram(
     "bronson_scan_directory_size_bytes",
     "Size of files found during scan",
-    ["directory", "pattern"]
+    ["directory", "pattern"],
 )
 
-bronson_info = Gauge(
-    "bronson_info",
-    "Info about the server",
-    ["version"]
+# Custom Prometheus metrics for directory comparison operations
+comparison_duplicates_found_total = Gauge(
+    "bronson_comparison_duplicates_found_total",
+    "Current number of duplicate subdirectories found between directories",
+    ["cleanup_directory", "target_directory"],
 )
+
+comparison_errors_total = Counter(
+    "bronson_comparison_errors_total",
+    "Total number of errors during directory comparison",
+    ["directory", "error_type"],
+)
+
+comparison_operation_duration = Histogram(
+    "bronson_comparison_operation_duration_seconds",
+    "Time spent on directory comparison operations",
+    ["operation_type", "cleanup_directory", "target_directory"],
+)
+
+# Custom Prometheus metrics for subdirectory operations
+subdirectories_found_total = Counter(
+    "bronson_subdirectories_found_total",
+    "Total number of subdirectories found",
+    ["directory", "operation_type"],
+)
+
+bronson_info = Gauge("bronson_info", "Info about the server", ["version"])
 
 
 def validate_directory(
-        directory_path: Path,
-        cleanup_dir: str,
-        operation_type: str = "scan",
-        ) -> None:
+    directory_path: Path,
+    cleanup_dir: str,
+    operation_type: str = "scan",
+) -> None:
     """
     Shared helper method to validate directory for cleanup/scan operations.
 
@@ -119,17 +160,19 @@ def validate_directory(
     if not directory_path.exists():
         if operation_type == "scan":
             scan_errors_total.labels(
-                directory=cleanup_dir,
-                error_type="directory_not_found"
+                directory=cleanup_dir, error_type="directory_not_found"
             ).inc()
-        else:  # cleanup
+        elif operation_type == "cleanup":
             cleanup_errors_total.labels(
-                directory=cleanup_dir,
-                error_type="directory_not_found"
+                directory=cleanup_dir, error_type="directory_not_found"
+            ).inc()
+        elif operation_type == "comparison":
+            comparison_errors_total.labels(
+                directory=cleanup_dir, error_type="directory_not_found"
             ).inc()
         raise HTTPException(
             status_code=404,
-            detail=f"Configured cleanup directory {cleanup_dir} not found",
+            detail=f"Configured directory {cleanup_dir} not found",
         )
 
     # Security check: prevent operations on critical system directories
@@ -156,7 +199,9 @@ def validate_directory(
     ):
         for sys_dir in critical_dirs:
             sys_dir_path = str(Path(sys_dir).resolve())
-            if dir_str == sys_dir_path or dir_str.startswith(sys_dir_path + "/"):  # noqa: E501
+            if dir_str == sys_dir_path or dir_str.startswith(
+                sys_dir_path + "/"
+            ):  # noqa: E501
                 raise HTTPException(
                     status_code=400,
                     detail="Configured cleanup directory is in a protected system location",  # noqa: E501
@@ -164,10 +209,10 @@ def validate_directory(
 
 
 def find_unwanted_files(
-        directory_path: Path,
-        patterns: List[str],
-        operation_type: str = "scan",
-        ):
+    directory_path: Path,
+    patterns: List[str],
+    operation_type: str = "scan",
+):
     """
     Shared helper method to find unwanted files in a directory.
 
@@ -201,19 +246,47 @@ def find_unwanted_files(
                         # Record file size metric based on operation type
                         if operation_type == "scan":
                             scan_directory_size_bytes.labels(
-                                directory=str(directory_path),
-                                pattern=pattern
+                                directory=str(directory_path), pattern=pattern
                             ).observe(file_size)
                         else:  # cleanup
                             cleanup_directory_size_bytes.labels(
-                                directory=str(directory_path),
-                                pattern=pattern
+                                directory=str(directory_path), pattern=pattern
                             ).observe(file_size)
                     except Exception:
                         file_sizes[str(file_path)] = 0
                     break
 
     return found_files, file_sizes, pattern_matches
+
+
+def get_subdirectories(
+    directory_path: Path, operation_type: str = "general"
+) -> List[str]:
+    """
+    Get all subdirectories in a directory.
+
+    Args:
+        directory_path: Path to the directory to scan
+        operation_type: Type of operation for metrics (e.g., "comparison", "scan", "cleanup")
+
+    Returns:
+        List of subdirectory names (not full paths)
+    """
+    subdirectories = []
+    try:
+        for item in directory_path.iterdir():
+            if item.is_dir():
+                subdirectories.append(item.name)
+    except Exception:
+        pass  # Return empty list if directory doesn't exist or can't be read
+
+    # Record metric for subdirectories found (but not for comparison operations)
+    if operation_type != "comparison":
+        subdirectories_found_total.labels(
+            directory=str(directory_path), operation_type=operation_type
+        ).inc(len(subdirectories))
+
+    return subdirectories
 
 
 app = FastAPI(title="Bronson", version=version)
@@ -313,17 +386,10 @@ async def cleanup_unwanted_files(
         validate_directory(directory_path, cleanup_dir, "cleanup")
     except Exception as e:  # noqa: E501
         cleanup_errors_total.labels(
-            directory=cleanup_dir,
-            error_type="validation_error"
+            directory=cleanup_dir, error_type="validation_error"
         ).inc()
-        msg = (
-            "Invalid cleanup directory: "
-            f"{str(e)}"
-        )
-        raise HTTPException(
-            status_code=400,
-            detail=msg
-        )
+        msg = "Invalid cleanup directory: " f"{str(e)}"
+        raise HTTPException(status_code=400, detail=msg)
 
     try:
         # Use shared helper to find unwanted files
@@ -344,37 +410,63 @@ async def cleanup_unwanted_files(
                     file_path.unlink()
                     removed_files.append(file_path_str)
                     cleanup_files_removed_total.labels(
-                        directory=cleanup_dir,
-                        pattern=pattern
+                        directory=cleanup_dir, pattern=pattern
                     ).inc()
+                    # Note: Current files gauge will be updated after all removals
                 except Exception as e:
-                    error_msg = f"Failed to remove {file_path}: {str(e)}"  # noqa: E501
+                    error_msg = (
+                        f"Failed to remove {file_path}: {str(e)}"  # noqa: E501
+                    )
                     errors.append(error_msg)
                     cleanup_errors_total.labels(
-                        directory=cleanup_dir,
-                        error_type="file_removal_error"
+                        directory=cleanup_dir, error_type="file_removal_error"
                     ).inc()
 
         # Record metrics for found files or zero out if none found
         if pattern_matches:
+            # Count files found for each pattern
+            pattern_counts = {}
             for file_path, pattern in pattern_matches.items():
+                pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
+
+            # Record metrics for each pattern
+            for pattern in patterns:
+                count = pattern_counts.get(pattern, 0)
                 cleanup_files_found_total.labels(
-                    directory=cleanup_dir,
-                    pattern=pattern
-                ).inc()
+                    directory=cleanup_dir, pattern=pattern
+                ).inc(count)
+                # Set current files gauge
+                cleanup_current_files.labels(
+                    directory=cleanup_dir, pattern=pattern
+                ).set(count)
         else:
             # Zero out metrics for each pattern when no files are found
             for pattern in patterns:
                 cleanup_files_found_total.labels(
-                    directory=cleanup_dir,
-                    pattern=pattern
-                ).inc(0)  # This sets the counter to 0 for this combination
+                    directory=cleanup_dir, pattern=pattern
+                ).inc(0)
+                # Set current files gauge to 0
+                cleanup_current_files.labels(
+                    directory=cleanup_dir, pattern=pattern
+                ).set(0)
+
+        # Update current files gauge after removal
+        if not dry_run and removed_files:
+            # Set current files gauge to 0 for patterns that had files removed
+            removed_patterns = set()
+            for file_path_str in removed_files:
+                pattern = pattern_matches[file_path_str]
+                removed_patterns.add(pattern)
+
+            for pattern in removed_patterns:
+                cleanup_current_files.labels(
+                    directory=cleanup_dir, pattern=pattern
+                ).set(0)
 
         # Record operation duration
         operation_duration = time.time() - start_time
         cleanup_operation_duration.labels(
-            operation_type="cleanup",
-            directory=cleanup_dir
+            operation_type="cleanup", directory=cleanup_dir
         ).observe(operation_duration)
 
         return {
@@ -391,8 +483,7 @@ async def cleanup_unwanted_files(
 
     except Exception as e:
         cleanup_errors_total.labels(
-            directory=cleanup_dir,
-            error_type="operation_error"
+            directory=cleanup_dir, error_type="operation_error"
         ).inc()
         raise HTTPException(
             status_code=500, detail=f"Error during cleanup: {str(e)}"
@@ -419,17 +510,10 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
         validate_directory(directory_path, cleanup_dir, "scan")
     except Exception as e:  # noqa: E501
         scan_errors_total.labels(
-            directory=cleanup_dir,
-            error_type="directory_error"
+            directory=cleanup_dir, error_type="directory_error"
         ).inc()
-        msg = (
-            "Invalid cleanup directory: "
-            f"{str(e)}"
-        )
-        raise HTTPException(
-            status_code=400,
-            detail=msg
-        )
+        msg = "Invalid cleanup directory: " f"{str(e)}"
+        raise HTTPException(status_code=400, detail=msg)
 
     try:
         # Use shared helper to find unwanted files
@@ -441,24 +525,36 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
 
         # Record metrics for found files or zero out if none found
         if pattern_matches:
+            # Count files found for each pattern
+            pattern_counts = {}
             for file_path, pattern in pattern_matches.items():
+                pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
+
+            # Record metrics for each pattern
+            for pattern in patterns:
+                count = pattern_counts.get(pattern, 0)
                 scan_files_found_total.labels(
-                    directory=cleanup_dir,
-                    pattern=pattern
-                ).inc()
+                    directory=cleanup_dir, pattern=pattern
+                ).inc(count)
+                # Set current files gauge
+                scan_current_files.labels(
+                    directory=cleanup_dir, pattern=pattern
+                ).set(count)
         else:
             # Zero out metrics for each pattern when no files are found
             for pattern in patterns:
                 scan_files_found_total.labels(
-                    directory=cleanup_dir,
-                    pattern=pattern
-                ).inc(0)  # This sets the counter to 0 for this combination
+                    directory=cleanup_dir, pattern=pattern
+                ).inc(0)
+                # Set current files gauge to 0
+                scan_current_files.labels(
+                    directory=cleanup_dir, pattern=pattern
+                ).set(0)
 
         # Record operation duration
         operation_duration = time.time() - start_time
         scan_operation_duration.labels(
-            operation_type="scan",
-            directory=cleanup_dir
+            operation_type="scan", directory=cleanup_dir
         ).observe(operation_duration)
 
         return {
@@ -473,11 +569,84 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
 
     except Exception as e:
         scan_errors_total.labels(
-            directory=cleanup_dir,
-            error_type="operation_error"
+            directory=cleanup_dir, error_type="operation_error"
         ).inc()
         raise HTTPException(
             status_code=500, detail=f"Error during scan: {str(e)}"
+        )
+
+
+@app.get("/api/v1/compare/directories")
+async def compare_directories(verbose: bool = False):
+    """
+    Compare subdirectories of CLEANUP_DIRECTORY with subdirectories of
+     TARGET_DIRECTORY and count duplicates that exist in both.
+
+    Args:
+        verbose: If True, include full lists of subdirectories in response
+    """
+    start_time = time.time()
+
+    cleanup_dir = get_cleanup_directory()
+    target_dir = get_target_directory()
+
+    try:
+        cleanup_path = Path(cleanup_dir).resolve()
+        target_path = Path(target_dir).resolve()
+
+        # Validate both directories
+        validate_directory(cleanup_path, cleanup_dir, "comparison")
+        validate_directory(target_path, target_dir, "comparison")
+
+        # Get subdirectories from both directories
+        cleanup_subdirs = get_subdirectories(cleanup_path, "comparison")
+        target_subdirs = get_subdirectories(target_path, "comparison")
+
+        # Find duplicates (subdirectories that exist in both)
+        cleanup_set = set(cleanup_subdirs)
+        target_set = set(target_subdirs)
+        duplicates = list(cleanup_set.intersection(target_set))
+
+        # Record metrics - only count duplicates, not all subdirectories
+        comparison_duplicates_found_total.labels(
+            cleanup_directory=cleanup_dir, target_directory=target_dir
+        ).set(len(duplicates))
+
+        # Record operation duration
+        operation_duration = time.time() - start_time
+        comparison_operation_duration.labels(
+            operation_type="compare",
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+        ).observe(operation_duration)
+
+        response = {
+            "cleanup_directory": str(cleanup_path),
+            "target_directory": str(target_path),
+            "duplicates": duplicates,
+            "duplicate_count": len(duplicates),
+            "total_cleanup_subdirectories": len(cleanup_subdirs),
+            "total_target_subdirectories": len(target_subdirs),
+        }
+
+        # Include full lists only if verbose is True
+        if verbose:
+            response["cleanup_subdirectories"] = cleanup_subdirs
+            response["target_subdirectories"] = target_subdirs
+
+        return response
+
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 404 for missing directories) as-is
+        raise
+    except Exception as e:
+        comparison_errors_total.labels(
+            directory=f"{cleanup_dir}:{target_dir}",
+            error_type="operation_error",
+        ).inc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error during directory comparison: {str(e)}",
         )
 
 

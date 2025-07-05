@@ -30,6 +30,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements-dev.txt
-      - name: Run lint
+      - name: Run lint and formatting checks
         run: |
-          make lint
+          make check

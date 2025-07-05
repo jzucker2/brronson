@@ -1,8 +1,10 @@
-import unittest
-import tempfile
 import os
+import tempfile
+import unittest
 from pathlib import Path
+
 from fastapi.testclient import TestClient
+
 from app.main import app
 from app.version import version
 
@@ -140,6 +142,7 @@ class TestCleanupEndpoints(unittest.TestCase):
 
         # Re-import and re-create the TestClient to pick up the new env var
         from importlib import reload
+
         import app.main
 
         reload(app.main)
@@ -219,11 +222,15 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert not (self.test_path / "YTSProxies.com.txt").exists()
         assert not (self.test_path / "YTSYifyUP123 (TOR).txt").exists()
         assert not (self.test_path / ".DS_Store").exists()
-        assert not (self.test_path / "subdir" / "YTSYifyUP123 (TOR).txt").exists()  # noqa: E501
+        assert not (
+            self.test_path / "subdir" / "YTSYifyUP123 (TOR).txt"
+        ).exists()  # noqa: E501
         assert not (self.test_path / "subdir" / "www.YTS.AM.jpg").exists()
         assert not (self.test_path / "subdir" / "www.YTS.LT.jpg").exists()
         assert not (self.test_path / "subdir" / "WWW.YTS.AG.jpg").exists()
-        assert not (self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg").exists()  # noqa: E501
+        assert not (
+            self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg"
+        ).exists()  # noqa: E501
         assert not (self.test_path / "subdir" / "YTSProxies.com.txt").exists()
 
         # Verify normal files still exist
@@ -307,11 +314,14 @@ class TestSharedHelperMethods(unittest.TestCase):
 
         # Clear Prometheus default registry to avoid duplicate metrics
         import prometheus_client
+
         prometheus_client.REGISTRY._names_to_collectors.clear()
 
         # Re-import to get fresh helper methods
         from importlib import reload
+
         import app.main
+
         reload(app.main)
         self.validate_directory = app.main.validate_directory
         self.find_unwanted_files = app.main.find_unwanted_files
@@ -320,14 +330,15 @@ class TestSharedHelperMethods(unittest.TestCase):
     def tearDown(self):
         """Clean up test directory"""
         import shutil
+
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_validate_directory_success(self):
         """Test validate_directory with valid directory"""
         try:
             self.validate_directory(
-                self.test_path, str(self.test_path),
-                "scan")
+                self.test_path, str(self.test_path), "scan"
+            )
         except Exception as e:
             self.fail(f"validate_directory raised {e} unexpectedly!")
 
@@ -336,9 +347,8 @@ class TestSharedHelperMethods(unittest.TestCase):
         nonexistent_path = Path("/nonexistent/test/directory")
         with self.assertRaises(Exception):
             self.validate_directory(
-                nonexistent_path,
-                str(nonexistent_path),
-                "scan")
+                nonexistent_path, str(nonexistent_path), "scan"
+            )
 
     def test_validate_directory_system_protection(self):
         """Test validate_directory with protected system directory"""
@@ -405,11 +415,36 @@ class TestSharedHelperMethods(unittest.TestCase):
 
         # Check that patterns are valid regex
         import re
+
         for pattern in self.DEFAULT_UNWANTED_PATTERNS:
             try:
                 re.compile(pattern)
             except re.error:
                 self.fail(f"Invalid regex pattern: {pattern}")
+
+    def test_get_subdirectories_with_metrics(self):
+        """Test that get_subdirectories records metrics properly"""
+        # Create test subdirectories
+        (self.test_path / "test_dir1").mkdir()
+        (self.test_path / "test_dir2").mkdir()
+        (self.test_path / "test_file.txt").touch()
+
+        # Call get_subdirectories with operation type
+        from app.main import get_subdirectories
+
+        result = get_subdirectories(self.test_path, "test_operation")
+
+        # Check result
+        self.assertEqual(len(result), 2)
+        self.assertIn("test_dir1", result)
+        self.assertIn("test_dir2", result)
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have subdirectory metrics
+        self.assertIn("bronson_subdirectories_found_total", metrics_text)
 
 
 class TestMetricsBehavior(unittest.TestCase):
@@ -426,11 +461,14 @@ class TestMetricsBehavior(unittest.TestCase):
 
         # Clear Prometheus default registry
         import prometheus_client
+
         prometheus_client.REGISTRY._names_to_collectors.clear()
 
         # Re-import and re-create the TestClient
         from importlib import reload
+
         import app.main
+
         reload(app.main)
         global client
         client = TestClient(app.main.app)
@@ -438,6 +476,7 @@ class TestMetricsBehavior(unittest.TestCase):
     def tearDown(self):
         """Clean up test directory and restore environment"""
         import shutil
+
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
         if self.original_cleanup_dir is not None:
@@ -461,6 +500,7 @@ class TestMetricsBehavior(unittest.TestCase):
 
         # Should have scan metrics
         self.assertIn("bronson_scan_files_found_total", metrics_text)
+        self.assertIn("bronson_scan_current_files", metrics_text)
         self.assertIn("bronson_scan_operation_duration_seconds", metrics_text)
         self.assertIn("bronson_scan_directory_size_bytes", metrics_text)
 
@@ -499,15 +539,12 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have cleanup metrics
+        self.assertIn("bronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("bronson_cleanup_current_files", metrics_text)
         self.assertIn(
-            "bronson_cleanup_files_found_total",
-            metrics_text)
-        self.assertIn(
-            "bronson_cleanup_operation_duration_seconds",
-            metrics_text)
-        self.assertIn(
-            "bronson_cleanup_directory_size_bytes",
-            metrics_text)
+            "bronson_cleanup_operation_duration_seconds", metrics_text
+        )
+        self.assertIn("bronson_cleanup_directory_size_bytes", metrics_text)
 
     def test_cleanup_metrics_with_no_files_found(self):
         """Test cleanup metrics when no files are found (zero-out behavior)"""
@@ -526,12 +563,11 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have cleanup metrics even with zero files
+        self.assertIn("bronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("bronson_cleanup_current_files", metrics_text)
         self.assertIn(
-            "bronson_cleanup_files_found_total",
-            metrics_text)
-        self.assertIn(
-            "bronson_cleanup_operation_duration_seconds",
-            metrics_text)
+            "bronson_cleanup_operation_duration_seconds", metrics_text
+        )
 
     def test_cleanup_metrics_with_actual_removal(self):
         """Test cleanup metrics when files are actually removed"""
@@ -568,18 +604,14 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have both scan and cleanup metrics
+        self.assertIn("bronson_scan_files_found_total", metrics_text)
+        self.assertIn("bronson_scan_current_files", metrics_text)
+        self.assertIn("bronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("bronson_cleanup_current_files", metrics_text)
+        self.assertIn("bronson_scan_operation_duration_seconds", metrics_text)
         self.assertIn(
-            "bronson_scan_files_found_total",
-            metrics_text)
-        self.assertIn(
-            "bronson_cleanup_files_found_total",
-            metrics_text)
-        self.assertIn(
-            "bronson_scan_operation_duration_seconds",
-            metrics_text)
-        self.assertIn(
-            "bronson_cleanup_operation_duration_seconds",
-            metrics_text)
+            "bronson_cleanup_operation_duration_seconds", metrics_text
+        )
 
     def test_error_metrics(self):
         """Test error metrics are recorded properly"""
@@ -596,6 +628,237 @@ class TestMetricsBehavior(unittest.TestCase):
 
         # Should have error metrics
         self.assertIn("bronson_scan_errors_total", metrics_text)
+
+
+class TestDirectoryComparison(unittest.TestCase):
+    """Test the directory comparison functionality"""
+
+    def setUp(self):
+        """Set up test directories"""
+        self.test_dir = tempfile.mkdtemp()
+        self.test_path = Path(self.test_dir)
+
+        # Create cleanup directory structure
+        self.cleanup_dir = self.test_path / "cleanup"
+        self.cleanup_dir.mkdir()
+        (self.cleanup_dir / "shared_dir1").mkdir()
+        (self.cleanup_dir / "shared_dir2").mkdir()
+        (self.cleanup_dir / "cleanup_only").mkdir()
+
+        # Create target directory structure
+        self.target_dir = self.test_path / "target"
+        self.target_dir.mkdir()
+        (self.target_dir / "shared_dir1").mkdir()
+        (self.target_dir / "shared_dir2").mkdir()
+        (self.target_dir / "target_only").mkdir()
+
+        # Set environment variables
+        self.original_cleanup_dir = os.environ.get("CLEANUP_DIRECTORY")
+        self.original_target_dir = os.environ.get("TARGET_DIRECTORY")
+        os.environ["CLEANUP_DIRECTORY"] = str(self.cleanup_dir)
+        os.environ["TARGET_DIRECTORY"] = str(self.target_dir)
+
+        # Clear Prometheus default registry
+        import prometheus_client
+
+        prometheus_client.REGISTRY._names_to_collectors.clear()
+
+        # Re-import and re-create the TestClient
+        from importlib import reload
+
+        import app.main
+
+        reload(app.main)
+        global client
+        client = TestClient(app.main.app)
+
+    def tearDown(self):
+        """Clean up test directories and restore environment"""
+        import shutil
+
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+        if self.original_cleanup_dir is not None:
+            os.environ["CLEANUP_DIRECTORY"] = self.original_cleanup_dir
+        elif "CLEANUP_DIRECTORY" in os.environ:
+            del os.environ["CLEANUP_DIRECTORY"]
+
+        if self.original_target_dir is not None:
+            os.environ["TARGET_DIRECTORY"] = self.original_target_dir
+        elif "TARGET_DIRECTORY" in os.environ:
+            del os.environ["TARGET_DIRECTORY"]
+
+    def test_compare_directories_success(self):
+        """Test successful directory comparison (default non-verbose)"""
+        response = client.get("/api/v1/compare/directories")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check response structure (non-verbose should not include full lists)
+        self.assertIn("cleanup_directory", data)
+        self.assertIn("target_directory", data)
+        self.assertNotIn("cleanup_subdirectories", data)
+        self.assertNotIn("target_subdirectories", data)
+        self.assertIn("duplicates", data)
+        self.assertIn("duplicate_count", data)
+        self.assertIn("total_cleanup_subdirectories", data)
+        self.assertIn("total_target_subdirectories", data)
+
+        # Check expected results
+        self.assertEqual(data["duplicate_count"], 2)
+        self.assertIn("shared_dir1", data["duplicates"])
+        self.assertIn("shared_dir2", data["duplicates"])
+        self.assertEqual(data["total_cleanup_subdirectories"], 3)
+        self.assertEqual(data["total_target_subdirectories"], 3)
+
+    def test_compare_directories_verbose(self):
+        """Test successful directory comparison with verbose flag"""
+        response = client.get("/api/v1/compare/directories?verbose=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check response structure (verbose should include full lists)
+        self.assertIn("cleanup_directory", data)
+        self.assertIn("target_directory", data)
+        self.assertIn("cleanup_subdirectories", data)
+        self.assertIn("target_subdirectories", data)
+        self.assertIn("duplicates", data)
+        self.assertIn("duplicate_count", data)
+        self.assertIn("total_cleanup_subdirectories", data)
+        self.assertIn("total_target_subdirectories", data)
+
+        # Check expected results
+        self.assertEqual(data["duplicate_count"], 2)
+        self.assertIn("shared_dir1", data["duplicates"])
+        self.assertIn("shared_dir2", data["duplicates"])
+        self.assertEqual(data["total_cleanup_subdirectories"], 3)
+        self.assertEqual(data["total_target_subdirectories"], 3)
+        self.assertIn("cleanup_only", data["cleanup_subdirectories"])
+        self.assertIn("target_only", data["target_subdirectories"])
+
+    def test_compare_directories_no_duplicates(self):
+        """Test directory comparison with no duplicates"""
+        # Remove shared directories
+        import shutil
+
+        shutil.rmtree(self.cleanup_dir / "shared_dir1")
+        shutil.rmtree(self.cleanup_dir / "shared_dir2")
+        shutil.rmtree(self.target_dir / "shared_dir1")
+        shutil.rmtree(self.target_dir / "shared_dir2")
+
+        response = client.get("/api/v1/compare/directories")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check response data
+        self.assertEqual(data["duplicate_count"], 0)
+        self.assertEqual(len(data["duplicates"]), 0)
+        self.assertEqual(
+            data["total_cleanup_subdirectories"], 1
+        )  # cleanup_only
+        self.assertEqual(data["total_target_subdirectories"], 1)  # target_only
+
+        # Check metrics - should be set to 0 for no duplicates
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have comparison metrics with value 0
+        self.assertIn(
+            "bronson_comparison_duplicates_found_total", metrics_text
+        )
+        # The metric should be present but with value 0
+        self.assertIn(
+            f'bronson_comparison_duplicates_found_total{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 0.0',
+            metrics_text,
+        )
+
+    def test_compare_directories_empty_directories(self):
+        """Test directory comparison with empty directories"""
+        # Remove all subdirectories
+        import shutil
+
+        for subdir in self.cleanup_dir.iterdir():
+            if subdir.is_dir():
+                shutil.rmtree(subdir)
+        for subdir in self.target_dir.iterdir():
+            if subdir.is_dir():
+                shutil.rmtree(subdir)
+
+        response = client.get("/api/v1/compare/directories")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check response data
+        self.assertEqual(data["duplicate_count"], 0)
+        self.assertEqual(data["total_cleanup_subdirectories"], 0)
+        self.assertEqual(data["total_target_subdirectories"], 0)
+
+        # Check metrics - should be set to 0 for empty directories
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have comparison metrics with value 0
+        self.assertIn(
+            "bronson_comparison_duplicates_found_total", metrics_text
+        )
+        # The metric should be present but with value 0
+        self.assertIn(
+            f'bronson_comparison_duplicates_found_total{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 0.0',
+            metrics_text,
+        )
+
+    def test_compare_directories_nonexistent_cleanup(self):
+        """Test directory comparison with nonexistent cleanup directory"""
+        os.environ["CLEANUP_DIRECTORY"] = "/nonexistent/cleanup"
+
+        response = client.get("/api/v1/compare/directories")
+        self.assertEqual(response.status_code, 404)
+
+    def test_compare_directories_nonexistent_target(self):
+        """Test directory comparison with nonexistent target directory"""
+        os.environ["TARGET_DIRECTORY"] = "/nonexistent/target"
+
+        response = client.get("/api/v1/compare/directories")
+        self.assertEqual(response.status_code, 404)
+
+    def test_compare_directories_metrics(self):
+        """Test that directory comparison records metrics"""
+        response = client.get("/api/v1/compare/directories")
+        self.assertEqual(response.status_code, 200)
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have comparison metrics
+        self.assertIn(
+            "bronson_comparison_duplicates_found_total", metrics_text
+        )
+        self.assertIn(
+            "bronson_comparison_operation_duration_seconds", metrics_text
+        )
+        # Should NOT have subdirectory metrics for comparison operations
+        # (only duplicates are counted, not all subdirectories)
+
+    def test_compare_directories_with_files(self):
+        """Test that directory comparison
+        only looks at directories, not files"""
+        # Add some files to the directories
+        (self.cleanup_dir / "test_file.txt").touch()
+        (self.target_dir / "test_file.txt").touch()
+        (self.cleanup_dir / "another_file.jpg").touch()
+
+        # Test with verbose flag to get the full lists
+        response = client.get("/api/v1/compare/directories?verbose=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Files should not be included in subdirectories
+        self.assertNotIn("test_file.txt", data["cleanup_subdirectories"])
+        self.assertNotIn("test_file.txt", data["target_subdirectories"])
+        another_file = "another_file.jpg"
+        cleanup_subdirs = data["cleanup_subdirectories"]
+        self.assertNotIn(another_file, cleanup_subdirs)
 
 
 if __name__ == "__main__":

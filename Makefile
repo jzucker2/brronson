@@ -49,9 +49,21 @@ test-docker: ## Run tests in Docker container
 	docker run --rm bronson pytest
 
 format: ## Format code with black
-	black app/ tests/ --max-line-length=79
+	black app/ tests/ --line-length=79
 
 lint: ## Lint code with flake8
 	flake8 app/ tests/
 
 check: format lint ## Run all checks (format, lint)
+
+lint-fix: ## Auto-fix linting issues where possible
+	black app/ tests/ --line-length=79
+	autopep8 --in-place --recursive --aggressive --aggressive app/ tests/
+
+pre-commit-install: ## Install pre-commit hooks
+	pre-commit install
+
+pre-commit-run: ## Run pre-commit hooks on all files
+	pre-commit run --all-files
+
+ci-check: pre-commit-run test ## Run all CI checks
