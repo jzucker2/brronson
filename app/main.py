@@ -15,6 +15,11 @@ def get_cleanup_directory():
     return os.getenv("CLEANUP_DIRECTORY", "/data")
 
 
+def get_target_directory():
+    """Get the target directory from environment variable"""
+    return os.getenv("TARGET_DIRECTORY", "/target")
+
+
 # Default patterns for common unwanted files
 DEFAULT_UNWANTED_PATTERNS = [
     r"www\.YTS\.MX\.jpg$",
@@ -93,6 +98,25 @@ scan_directory_size_bytes = Histogram(
     ["directory", "pattern"]
 )
 
+# Custom Prometheus metrics for directory comparison operations
+comparison_duplicates_found_total = Counter(
+    "bronson_comparison_duplicates_found_total",
+    "Total number of duplicate subdirectories found during comparison",
+    ["cleanup_directory", "target_directory"]
+)
+
+comparison_errors_total = Counter(
+    "bronson_comparison_errors_total",
+    "Total number of errors during directory comparison",
+    ["directory", "error_type"]
+)
+
+comparison_operation_duration = Histogram(
+    "bronson_comparison_operation_duration_seconds",
+    "Time spent on directory comparison operations",
+    ["operation_type", "cleanup_directory", "target_directory"]
+)
+
 bronson_info = Gauge(
     "bronson_info",
     "Info about the server",
@@ -122,14 +146,19 @@ def validate_directory(
                 directory=cleanup_dir,
                 error_type="directory_not_found"
             ).inc()
-        else:  # cleanup
+        elif operation_type == "cleanup":
             cleanup_errors_total.labels(
+                directory=cleanup_dir,
+                error_type="directory_not_found"
+            ).inc()
+        elif operation_type == "comparison":
+            comparison_errors_total.labels(
                 directory=cleanup_dir,
                 error_type="directory_not_found"
             ).inc()
         raise HTTPException(
             status_code=404,
-            detail=f"Configured cleanup directory {cleanup_dir} not found",
+            detail=f"Configured directory {cleanup_dir} not found",
         )
 
     # Security check: prevent operations on critical system directories
@@ -214,6 +243,26 @@ def find_unwanted_files(
                     break
 
     return found_files, file_sizes, pattern_matches
+
+
+def get_subdirectories(directory_path: Path) -> List[str]:
+    """
+    Get all subdirectories in a directory.
+
+    Args:
+        directory_path: Path to the directory to scan
+
+    Returns:
+        List of subdirectory names (not full paths)
+    """
+    subdirectories = []
+    try:
+        for item in directory_path.iterdir():
+            if item.is_dir():
+                subdirectories.append(item.name)
+    except Exception:
+        pass  # Return empty list if directory doesn't exist or can't be read
+    return subdirectories
 
 
 app = FastAPI(title="Bronson", version=version)
@@ -357,18 +406,20 @@ async def cleanup_unwanted_files(
 
         # Record metrics for found files or zero out if none found
         if pattern_matches:
-            for file_path, pattern in pattern_matches.items():
-                cleanup_files_found_total.labels(
+            for pattern in patterns:
+                label = cleanup_files_found_total.labels(
                     directory=cleanup_dir,
                     pattern=pattern
-                ).inc()
+                )
+                label.inc(0)
         else:
             # Zero out metrics for each pattern when no files are found
             for pattern in patterns:
-                cleanup_files_found_total.labels(
+                label = cleanup_files_found_total.labels(
                     directory=cleanup_dir,
                     pattern=pattern
-                ).inc(0)  # This sets the counter to 0 for this combination
+                )
+                label.inc(0)
 
         # Record operation duration
         operation_duration = time.time() - start_time
@@ -395,7 +446,8 @@ async def cleanup_unwanted_files(
             error_type="operation_error"
         ).inc()
         raise HTTPException(
-            status_code=500, detail=f"Error during cleanup: {str(e)}"
+            status_code=500,
+            detail=f"Error during cleanup: {str(e)}"
         )
 
 
@@ -441,18 +493,20 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
 
         # Record metrics for found files or zero out if none found
         if pattern_matches:
-            for file_path, pattern in pattern_matches.items():
-                scan_files_found_total.labels(
+            for pattern in patterns:
+                label = scan_files_found_total.labels(
                     directory=cleanup_dir,
                     pattern=pattern
-                ).inc()
+                )
+                label.inc(0)
         else:
             # Zero out metrics for each pattern when no files are found
             for pattern in patterns:
-                scan_files_found_total.labels(
+                label = scan_files_found_total.labels(
                     directory=cleanup_dir,
                     pattern=pattern
-                ).inc(0)  # This sets the counter to 0 for this combination
+                )
+                label.inc(0)
 
         # Record operation duration
         operation_duration = time.time() - start_time
@@ -478,6 +532,73 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
         ).inc()
         raise HTTPException(
             status_code=500, detail=f"Error during scan: {str(e)}"
+        )
+
+
+@app.get("/api/v1/compare/directories")
+async def compare_directories():
+    """
+    Compare subdirectories of CLEANUP_DIRECTORY with subdirectories of
+     TARGET_DIRECTORY and count duplicates that exist in both.
+    """
+    start_time = time.time()
+
+    cleanup_dir = get_cleanup_directory()
+    target_dir = get_target_directory()
+
+    try:
+        cleanup_path = Path(cleanup_dir).resolve()
+        target_path = Path(target_dir).resolve()
+
+        # Validate both directories
+        validate_directory(cleanup_path, cleanup_dir, "comparison")
+        validate_directory(target_path, target_dir, "comparison")
+
+        # Get subdirectories from both directories
+        cleanup_subdirs = get_subdirectories(cleanup_path)
+        target_subdirs = get_subdirectories(target_path)
+
+        # Find duplicates (subdirectories that exist in both)
+        cleanup_set = set(cleanup_subdirs)
+        target_set = set(target_subdirs)
+        duplicates = list(cleanup_set.intersection(target_set))
+
+        # Record metrics
+        comparison_duplicates_found_total.labels(
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir
+        ).inc(len(duplicates))
+
+        # Record operation duration
+        operation_duration = time.time() - start_time
+        comparison_operation_duration.labels(
+            operation_type="compare",
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir
+        ).observe(operation_duration)
+
+        return {
+            "cleanup_directory": str(cleanup_path),
+            "target_directory": str(target_path),
+            "cleanup_subdirectories": cleanup_subdirs,
+            "target_subdirectories": target_subdirs,
+            "duplicate_count": len(duplicates),
+            "duplicates": duplicates,
+            "cleanup_only": list(cleanup_set - target_set),
+            "target_only": list(target_set - cleanup_set)
+        }
+
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 404 for missing directories) as-is
+        raise
+    except Exception as e:
+        comparison_errors_total.labels(
+            directory=f"{cleanup_dir}:{target_dir}",
+            error_type="operation_error"
+        ).inc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error during directory comparison: {str(e)}"
         )
 
 

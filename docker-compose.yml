@@ -10,6 +10,7 @@ services:
       - PROMETHEUS_MULTIPROC_DIR=/tmp
       - ENABLE_METRICS=true
       - CLEANUP_DIRECTORY=/data
+      - TARGET_DIRECTORY=/target
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
