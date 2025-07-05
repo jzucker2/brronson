@@ -745,8 +745,27 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
+        # Check response data
         self.assertEqual(data["duplicate_count"], 0)
         self.assertEqual(len(data["duplicates"]), 0)
+        self.assertEqual(
+            data["total_cleanup_subdirectories"], 1
+        )  # cleanup_only
+        self.assertEqual(data["total_target_subdirectories"], 1)  # target_only
+
+        # Check metrics - should be set to 0 for no duplicates
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have comparison metrics with value 0
+        self.assertIn(
+            "bronson_comparison_duplicates_found_total", metrics_text
+        )
+        # The metric should be present but with value 0
+        self.assertIn(
+            f'bronson_comparison_duplicates_found_total{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 0.0',
+            metrics_text,
+        )
 
     def test_compare_directories_empty_directories(self):
         """Test directory comparison with empty directories"""
@@ -764,9 +783,24 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
+        # Check response data
         self.assertEqual(data["duplicate_count"], 0)
         self.assertEqual(data["total_cleanup_subdirectories"], 0)
         self.assertEqual(data["total_target_subdirectories"], 0)
+
+        # Check metrics - should be set to 0 for empty directories
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have comparison metrics with value 0
+        self.assertIn(
+            "bronson_comparison_duplicates_found_total", metrics_text
+        )
+        # The metric should be present but with value 0
+        self.assertIn(
+            f'bronson_comparison_duplicates_found_total{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 0.0',
+            metrics_text,
+        )
 
     def test_compare_directories_nonexistent_cleanup(self):
         """Test directory comparison with nonexistent cleanup directory"""

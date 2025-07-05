@@ -101,9 +101,9 @@ scan_directory_size_bytes = Histogram(
 )
 
 # Custom Prometheus metrics for directory comparison operations
-comparison_duplicates_found_total = Counter(
+comparison_duplicates_found_total = Gauge(
     "bronson_comparison_duplicates_found_total",
-    "Total number of duplicate subdirectories found during comparison",
+    "Current number of duplicate subdirectories found between directories",
     ["cleanup_directory", "target_directory"],
 )
 
@@ -558,7 +558,7 @@ async def compare_directories(verbose: bool = False):
         # Record metrics - only count duplicates, not all subdirectories
         comparison_duplicates_found_total.labels(
             cleanup_directory=cleanup_dir, target_directory=target_dir
-        ).inc(len(duplicates))
+        ).set(len(duplicates))
 
         # Record operation duration
         operation_duration = time.time() - start_time
