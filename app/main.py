@@ -51,6 +51,12 @@ cleanup_files_found_total = Counter(
     ["directory", "pattern"],
 )
 
+cleanup_current_files = Gauge(
+    "bronson_cleanup_current_files",
+    "Current number of unwanted files in directory",
+    ["directory", "pattern"],
+)
+
 cleanup_files_removed_total = Counter(
     "bronson_cleanup_files_removed_total",
     "Total number of files successfully removed during cleanup",
@@ -79,6 +85,12 @@ cleanup_directory_size_bytes = Histogram(
 scan_files_found_total = Counter(
     "bronson_scan_files_found_total",
     "Total number of unwanted files found during scan",
+    ["directory", "pattern"],
+)
+
+scan_current_files = Gauge(
+    "bronson_scan_current_files",
+    "Current number of unwanted files in directory",
     ["directory", "pattern"],
 )
 
@@ -400,6 +412,7 @@ async def cleanup_unwanted_files(
                     cleanup_files_removed_total.labels(
                         directory=cleanup_dir, pattern=pattern
                     ).inc()
+                    # Note: Current files gauge will be updated after all removals
                 except Exception as e:
                     error_msg = (
                         f"Failed to remove {file_path}: {str(e)}"  # noqa: E501
@@ -411,18 +424,44 @@ async def cleanup_unwanted_files(
 
         # Record metrics for found files or zero out if none found
         if pattern_matches:
+            # Count files found for each pattern
+            pattern_counts = {}
+            for file_path, pattern in pattern_matches.items():
+                pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
+
+            # Record metrics for each pattern
             for pattern in patterns:
-                label = cleanup_files_found_total.labels(
+                count = pattern_counts.get(pattern, 0)
+                cleanup_files_found_total.labels(
                     directory=cleanup_dir, pattern=pattern
-                )
-                label.inc(0)
+                ).inc(count)
+                # Set current files gauge
+                cleanup_current_files.labels(
+                    directory=cleanup_dir, pattern=pattern
+                ).set(count)
         else:
             # Zero out metrics for each pattern when no files are found
             for pattern in patterns:
-                label = cleanup_files_found_total.labels(
+                cleanup_files_found_total.labels(
                     directory=cleanup_dir, pattern=pattern
-                )
-                label.inc(0)
+                ).inc(0)
+                # Set current files gauge to 0
+                cleanup_current_files.labels(
+                    directory=cleanup_dir, pattern=pattern
+                ).set(0)
+
+        # Update current files gauge after removal
+        if not dry_run and removed_files:
+            # Set current files gauge to 0 for patterns that had files removed
+            removed_patterns = set()
+            for file_path_str in removed_files:
+                pattern = pattern_matches[file_path_str]
+                removed_patterns.add(pattern)
+
+            for pattern in removed_patterns:
+                cleanup_current_files.labels(
+                    directory=cleanup_dir, pattern=pattern
+                ).set(0)
 
         # Record operation duration
         operation_duration = time.time() - start_time
@@ -486,18 +525,31 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
 
         # Record metrics for found files or zero out if none found
         if pattern_matches:
+            # Count files found for each pattern
+            pattern_counts = {}
+            for file_path, pattern in pattern_matches.items():
+                pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
+
+            # Record metrics for each pattern
             for pattern in patterns:
-                label = scan_files_found_total.labels(
+                count = pattern_counts.get(pattern, 0)
+                scan_files_found_total.labels(
                     directory=cleanup_dir, pattern=pattern
-                )
-                label.inc(0)
+                ).inc(count)
+                # Set current files gauge
+                scan_current_files.labels(
+                    directory=cleanup_dir, pattern=pattern
+                ).set(count)
         else:
             # Zero out metrics for each pattern when no files are found
             for pattern in patterns:
-                label = scan_files_found_total.labels(
+                scan_files_found_total.labels(
                     directory=cleanup_dir, pattern=pattern
-                )
-                label.inc(0)
+                ).inc(0)
+                # Set current files gauge to 0
+                scan_current_files.labels(
+                    directory=cleanup_dir, pattern=pattern
+                ).set(0)
 
         # Record operation duration
         operation_duration = time.time() - start_time

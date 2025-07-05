@@ -500,6 +500,7 @@ class TestMetricsBehavior(unittest.TestCase):
 
         # Should have scan metrics
         self.assertIn("bronson_scan_files_found_total", metrics_text)
+        self.assertIn("bronson_scan_current_files", metrics_text)
         self.assertIn("bronson_scan_operation_duration_seconds", metrics_text)
         self.assertIn("bronson_scan_directory_size_bytes", metrics_text)
 
@@ -539,6 +540,7 @@ class TestMetricsBehavior(unittest.TestCase):
 
         # Should have cleanup metrics
         self.assertIn("bronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("bronson_cleanup_current_files", metrics_text)
         self.assertIn(
             "bronson_cleanup_operation_duration_seconds", metrics_text
         )
@@ -562,6 +564,7 @@ class TestMetricsBehavior(unittest.TestCase):
 
         # Should have cleanup metrics even with zero files
         self.assertIn("bronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("bronson_cleanup_current_files", metrics_text)
         self.assertIn(
             "bronson_cleanup_operation_duration_seconds", metrics_text
         )
@@ -602,7 +605,9 @@ class TestMetricsBehavior(unittest.TestCase):
 
         # Should have both scan and cleanup metrics
         self.assertIn("bronson_scan_files_found_total", metrics_text)
+        self.assertIn("bronson_scan_current_files", metrics_text)
         self.assertIn("bronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("bronson_cleanup_current_files", metrics_text)
         self.assertIn("bronson_scan_operation_duration_seconds", metrics_text)
         self.assertIn(
             "bronson_cleanup_operation_duration_seconds", metrics_text
