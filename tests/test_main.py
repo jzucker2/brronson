@@ -219,11 +219,15 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert not (self.test_path / "YTSProxies.com.txt").exists()
         assert not (self.test_path / "YTSYifyUP123 (TOR).txt").exists()
         assert not (self.test_path / ".DS_Store").exists()
-        assert not (self.test_path / "subdir" / "YTSYifyUP123 (TOR).txt").exists()  # noqa: E501
+        assert not (
+            self.test_path / "subdir" / "YTSYifyUP123 (TOR).txt"
+        ).exists()  # noqa: E501
         assert not (self.test_path / "subdir" / "www.YTS.AM.jpg").exists()
         assert not (self.test_path / "subdir" / "www.YTS.LT.jpg").exists()
         assert not (self.test_path / "subdir" / "WWW.YTS.AG.jpg").exists()
-        assert not (self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg").exists()  # noqa: E501
+        assert not (
+            self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg"
+        ).exists()  # noqa: E501
         assert not (self.test_path / "subdir" / "YTSProxies.com.txt").exists()
 
         # Verify normal files still exist
@@ -307,11 +311,13 @@ class TestSharedHelperMethods(unittest.TestCase):
 
         # Clear Prometheus default registry to avoid duplicate metrics
         import prometheus_client
+
         prometheus_client.REGISTRY._names_to_collectors.clear()
 
         # Re-import to get fresh helper methods
         from importlib import reload
         import app.main
+
         reload(app.main)
         self.validate_directory = app.main.validate_directory
         self.find_unwanted_files = app.main.find_unwanted_files
@@ -320,14 +326,15 @@ class TestSharedHelperMethods(unittest.TestCase):
     def tearDown(self):
         """Clean up test directory"""
         import shutil
+
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_validate_directory_success(self):
         """Test validate_directory with valid directory"""
         try:
             self.validate_directory(
-                self.test_path, str(self.test_path),
-                "scan")
+                self.test_path, str(self.test_path), "scan"
+            )
         except Exception as e:
             self.fail(f"validate_directory raised {e} unexpectedly!")
 
@@ -336,9 +343,8 @@ class TestSharedHelperMethods(unittest.TestCase):
         nonexistent_path = Path("/nonexistent/test/directory")
         with self.assertRaises(Exception):
             self.validate_directory(
-                nonexistent_path,
-                str(nonexistent_path),
-                "scan")
+                nonexistent_path, str(nonexistent_path), "scan"
+            )
 
     def test_validate_directory_system_protection(self):
         """Test validate_directory with protected system directory"""
@@ -405,11 +411,36 @@ class TestSharedHelperMethods(unittest.TestCase):
 
         # Check that patterns are valid regex
         import re
+
         for pattern in self.DEFAULT_UNWANTED_PATTERNS:
             try:
                 re.compile(pattern)
             except re.error:
                 self.fail(f"Invalid regex pattern: {pattern}")
+
+    def test_get_subdirectories_with_metrics(self):
+        """Test that get_subdirectories records metrics properly"""
+        # Create test subdirectories
+        (self.test_path / "test_dir1").mkdir()
+        (self.test_path / "test_dir2").mkdir()
+        (self.test_path / "test_file.txt").touch()
+
+        # Call get_subdirectories with operation type
+        from app.main import get_subdirectories
+
+        result = get_subdirectories(self.test_path, "test_operation")
+
+        # Check result
+        self.assertEqual(len(result), 2)
+        self.assertIn("test_dir1", result)
+        self.assertIn("test_dir2", result)
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have subdirectory metrics
+        self.assertIn("bronson_subdirectories_found_total", metrics_text)
 
 
 class TestMetricsBehavior(unittest.TestCase):
@@ -426,11 +457,13 @@ class TestMetricsBehavior(unittest.TestCase):
 
         # Clear Prometheus default registry
         import prometheus_client
+
         prometheus_client.REGISTRY._names_to_collectors.clear()
 
         # Re-import and re-create the TestClient
         from importlib import reload
         import app.main
+
         reload(app.main)
         global client
         client = TestClient(app.main.app)
@@ -438,6 +471,7 @@ class TestMetricsBehavior(unittest.TestCase):
     def tearDown(self):
         """Clean up test directory and restore environment"""
         import shutil
+
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
         if self.original_cleanup_dir is not None:
@@ -499,18 +533,11 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have cleanup metrics
+        self.assertIn("bronson_cleanup_files_found_total", metrics_text)
         self.assertIn(
-            "bronson_cleanup_files_found_total",
-            metrics_text
+            "bronson_cleanup_operation_duration_seconds", metrics_text
         )
-        self.assertIn(
-            "bronson_cleanup_operation_duration_seconds",
-            metrics_text
-        )
-        self.assertIn(
-            "bronson_cleanup_directory_size_bytes",
-            metrics_text
-        )
+        self.assertIn("bronson_cleanup_directory_size_bytes", metrics_text)
 
     def test_cleanup_metrics_with_no_files_found(self):
         """Test cleanup metrics when no files are found (zero-out behavior)"""
@@ -529,13 +556,9 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have cleanup metrics even with zero files
+        self.assertIn("bronson_cleanup_files_found_total", metrics_text)
         self.assertIn(
-            "bronson_cleanup_files_found_total",
-            metrics_text
-        )
-        self.assertIn(
-            "bronson_cleanup_operation_duration_seconds",
-            metrics_text
+            "bronson_cleanup_operation_duration_seconds", metrics_text
         )
 
     def test_cleanup_metrics_with_actual_removal(self):
@@ -573,21 +596,11 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have both scan and cleanup metrics
+        self.assertIn("bronson_scan_files_found_total", metrics_text)
+        self.assertIn("bronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("bronson_scan_operation_duration_seconds", metrics_text)
         self.assertIn(
-            "bronson_scan_files_found_total",
-            metrics_text
-        )
-        self.assertIn(
-            "bronson_cleanup_files_found_total",
-            metrics_text
-        )
-        self.assertIn(
-            "bronson_scan_operation_duration_seconds",
-            metrics_text
-        )
-        self.assertIn(
-            "bronson_cleanup_operation_duration_seconds",
-            metrics_text
+            "bronson_cleanup_operation_duration_seconds", metrics_text
         )
 
     def test_error_metrics(self):
@@ -637,11 +650,13 @@ class TestDirectoryComparison(unittest.TestCase):
 
         # Clear Prometheus default registry
         import prometheus_client
+
         prometheus_client.REGISTRY._names_to_collectors.clear()
 
         # Re-import and re-create the TestClient
         from importlib import reload
         import app.main
+
         reload(app.main)
         global client
         client = TestClient(app.main.app)
@@ -649,6 +664,7 @@ class TestDirectoryComparison(unittest.TestCase):
     def tearDown(self):
         """Clean up test directories and restore environment"""
         import shutil
+
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
         if self.original_cleanup_dir is not None:
@@ -688,6 +704,7 @@ class TestDirectoryComparison(unittest.TestCase):
         """Test directory comparison with no duplicates"""
         # Remove shared directories
         import shutil
+
         shutil.rmtree(self.cleanup_dir / "shared_dir1")
         shutil.rmtree(self.cleanup_dir / "shared_dir2")
         shutil.rmtree(self.target_dir / "shared_dir1")
@@ -704,6 +721,7 @@ class TestDirectoryComparison(unittest.TestCase):
         """Test directory comparison with empty directories"""
         # Remove all subdirectories
         import shutil
+
         for subdir in self.cleanup_dir.iterdir():
             if subdir.is_dir():
                 shutil.rmtree(subdir)
@@ -744,17 +762,17 @@ class TestDirectoryComparison(unittest.TestCase):
 
         # Should have comparison metrics
         self.assertIn(
-            "bronson_comparison_duplicates_found_total",
-            metrics_text
+            "bronson_comparison_duplicates_found_total", metrics_text
         )
         self.assertIn(
-            "bronson_comparison_operation_duration_seconds",
-            metrics_text
+            "bronson_comparison_operation_duration_seconds", metrics_text
         )
+        # Should have subdirectory metrics
+        self.assertIn("bronson_subdirectories_found_total", metrics_text)
 
     def test_compare_directories_with_files(self):
         """Test that directory comparison
-          only looks at directories, not files"""
+        only looks at directories, not files"""
         # Add some files to the directories
         (self.cleanup_dir / "test_file.txt").touch()
         (self.target_dir / "test_file.txt").touch()
@@ -769,10 +787,7 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertNotIn("test_file.txt", data["target_subdirectories"])
         another_file = "another_file.jpg"
         cleanup_subdirs = data["cleanup_subdirectories"]
-        self.assertNotIn(
-            another_file,
-            cleanup_subdirs
-        )
+        self.assertNotIn(another_file, cleanup_subdirs)
 
 
 if __name__ == "__main__":

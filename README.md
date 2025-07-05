@@ -21,16 +21,18 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 ### Running with Docker Compose
 
 1. **Start the complete stack**:
+
    ```bash
    docker-compose up -d
    ```
 
 2. **Access the services**:
-   - FastAPI App: http://localhost:1968
-   - API Documentation: http://localhost:1968/docs
-   - Prometheus Metrics: http://localhost:1968/metrics
+   - FastAPI App: <http://localhost:1968>
+   - API Documentation: <http://localhost:1968/docs>
+   - Prometheus Metrics: <http://localhost:1968/metrics>
 
 3. **Stop the services**:
+
    ```bash
    docker-compose down
    ```
@@ -38,20 +40,23 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 ### Running Locally
 
 1. **Install dependencies**:
+
    ```bash
    pip install -r requirements.txt
    ```
 
 2. **Run the application**:
+
    ```bash
    uvicorn app.main:app --reload --host 0.0.0.0 --port 1968
    ```
 
 3. **Run tests**:
+
    ```bash
    # Run tests locally
    pytest
-   
+
    # Or run tests in Docker
    docker build -t bronson-api .
    docker run --rm bronson-api pytest
@@ -79,6 +84,7 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 #### File Cleanup Usage
 
 The cleanup endpoints help remove unwanted files like:
+
 - `www.YTS.MX.jpg`
 - `YIFYStatus.com.txt`
 - `.DS_Store` (macOS)
@@ -89,11 +95,13 @@ The cleanup endpoints help remove unwanted files like:
 The cleanup directory is controlled by the `CLEANUP_DIRECTORY` environment variable (default: `/tmp`).
 
 **Scan for unwanted files:**
+
 ```bash
 curl "http://localhost:1968/api/v1/cleanup/scan"
 ```
 
 **Remove unwanted files (dry run first):**
+
 ```bash
 # Dry run to see what would be deleted
 curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=true"
@@ -103,6 +111,7 @@ curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false"
 ```
 
 **Use custom patterns:**
+
 ```bash
 curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false" \
   -H "Content-Type: application/json" \
@@ -110,6 +119,7 @@ curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false" \
 ```
 
 **Safety Features:**
+
 - Default `dry_run=true` prevents accidental deletions
 - Single directory controlled by environment variable for security
 - Critical system directories are protected
@@ -140,7 +150,7 @@ The metrics endpoint is automatically exposed at `/metrics` and supports gzip co
 
 ### Viewing Metrics
 
-You can view the Prometheus metrics directly at http://localhost:1968/metrics or use any Prometheus-compatible monitoring system to scrape this endpoint.
+You can view the Prometheus metrics directly at <http://localhost:1968/metrics> or use any Prometheus-compatible monitoring system to scrape this endpoint.
 
 ## Testing
 
@@ -178,6 +188,48 @@ docker run --rm bronson-api pytest
   - Response formats
 
 ## Development
+
+### Code Quality and Linting
+
+This project uses several tools to ensure code quality and consistency:
+
+#### Automatic Linting Setup
+
+1. **Pre-commit Hooks** (Recommended)
+   - Automatically runs linting checks before each commit
+   - Installed with: `make pre-commit-install`
+   - Runs: black formatting, flake8 linting, trailing whitespace removal
+   - If hooks fail, the commit is blocked until issues are fixed
+
+2. **VS Code Integration**
+   - Automatic formatting on save
+   - Real-time linting error display
+   - Import organization on save
+   - Settings configured in `.vscode/settings.json`
+
+3. **Manual Commands**
+
+   ```bash
+   make format      # Format code with black
+   make lint        # Check code with flake8
+   make lint-fix    # Auto-fix linting issues where possible
+   make check       # Run both format and lint
+   make ci-check    # Run all CI checks (pre-commit + tests)
+   ```
+
+#### Linting Rules
+
+- **Line length**: 79 characters maximum
+- **Formatter**: Black (uncompromising)
+- **Linter**: Flake8 with custom configuration
+- **Auto-fixing**: Available for whitespace and basic formatting issues
+
+#### Best Practices
+
+1. **Always run `make check` before committing**
+2. **Use pre-commit hooks** to catch issues automatically
+3. **Fix linting errors immediately** when they appear
+4. **Use `make lint-fix`** for automatic fixes when possible
 
 ### Project Structure
 
@@ -218,6 +270,7 @@ The Docker image includes built-in health checks that:
 - Retry up to 3 times before marking as unhealthy
 
 You can check the health status with:
+
 ```bash
 docker ps  # Shows health status
 docker inspect <container_id>  # Shows detailed health check info
