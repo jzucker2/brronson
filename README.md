@@ -99,23 +99,23 @@ The cleanup directory is controlled by the `CLEANUP_DIRECTORY` environment varia
 **Scan for unwanted files:**
 
 ```bash
-curl "http://localhost:1968/api/v1/cleanup/scan"
+curl "http://10.0.1.64:1968/api/v1/cleanup/scan"
 ```
 
 **Remove unwanted files (dry run first):**
 
 ```bash
 # Dry run to see what would be deleted
-curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=true"
+curl -X POST "http://10.0.1.64:1968/api/v1/cleanup/files?dry_run=true"
 
 # Actually remove the files
-curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false"
+curl -X POST "http://10.0.1.64:1968/api/v1/cleanup/files?dry_run=false"
 ```
 
 **Use custom patterns:**
 
 ```bash
-curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false" \
+curl -X POST "http://10.0.1.64:1968/api/v1/cleanup/files?dry_run=false" \
   -H "Content-Type: application/json" \
   -d '{"patterns": ["\\.mp4$", "\\.avi$"]}'
 ```
@@ -144,13 +144,13 @@ The directory comparison endpoint helps identify duplicate subdirectories betwee
 **Compare directories (default - counts only):**
 
 ```bash
-curl "http://localhost:1968/api/v1/compare/directories"
+curl "http://10.0.1.64:1968/api/v1/compare/directories"
 ```
 
 **Compare directories with verbose output:**
 
 ```bash
-curl "http://localhost:1968/api/v1/compare/directories?verbose=true"
+curl "http://10.0.1.64:1968/api/v1/compare/directories?verbose=true"
 ```
 
 **Response format (default):**
@@ -206,13 +206,13 @@ The file move endpoint helps move non-duplicate subdirectories from the cleanup 
 **Move non-duplicate directories (dry run - default):**
 
 ```bash
-curl -X POST "http://localhost:1968/api/v1/move/non-duplicates"
+curl -X POST "http://10.0.1.64:1968/api/v1/move/non-duplicates"
 ```
 
 **Move non-duplicate directories (actual move):**
 
 ```bash
-curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false"
+curl -X POST "http://10.0.1.64:1968/api/v1/move/non-duplicates?dry_run=false"
 ```
 
 **Response format:**
@@ -273,9 +273,9 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 
 #### File Cleanup Metrics
 
-- `bronson_cleanup_files_found_total` - Total unwanted files found during cleanup operations
-- `bronson_cleanup_current_files` - Current number of unwanted files in directory
-- `bronson_cleanup_files_removed_total` - Total files successfully removed during cleanup
+- `bronson_cleanup_files_found_total` - Total unwanted files found during cleanup (labels: directory, pattern, dry_run)
+- `bronson_cleanup_current_files` - Current number of unwanted files in directory (labels: directory, pattern, dry_run)
+- `bronson_cleanup_files_removed_total` - Total files successfully removed during cleanup (labels: directory, pattern, dry_run)
 - `bronson_cleanup_errors_total` - Total errors during file cleanup operations
 - `bronson_cleanup_operation_duration_seconds` - Time spent on cleanup operations
 
@@ -291,8 +291,8 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `bronson_move_files_moved_total` - Total files successfully moved
 - `bronson_move_errors_total` - Total errors during file move operations
 - `bronson_move_operation_duration_seconds` - Time spent on file move operations
-- `bronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation
-- `bronson_move_directories_moved` - Number of directories successfully moved
+- `bronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation (labels: cleanup_directory, target_directory, dry_run)
+- `bronson_move_directories_moved` - Number of directories successfully moved (labels: cleanup_directory, target_directory, dry_run)
 
 The metrics endpoint is automatically exposed at `/metrics` and supports gzip compression for efficient data transfer.
 

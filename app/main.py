@@ -48,19 +48,19 @@ DEFAULT_UNWANTED_PATTERNS = [
 cleanup_files_found_total = Counter(
     "bronson_cleanup_files_found_total",
     "Total number of unwanted files found during cleanup",
-    ["directory", "pattern"],
+    ["directory", "pattern", "dry_run"],
 )
 
 cleanup_current_files = Gauge(
     "bronson_cleanup_current_files",
     "Current number of unwanted files in directory",
-    ["directory", "pattern"],
+    ["directory", "pattern", "dry_run"],
 )
 
 cleanup_files_removed_total = Counter(
     "bronson_cleanup_files_removed_total",
     "Total number of files successfully removed during cleanup",
-    ["directory", "pattern"],
+    ["directory", "pattern", "dry_run"],
 )
 
 cleanup_errors_total = Counter(
@@ -166,13 +166,13 @@ move_operation_duration = Histogram(
 move_duplicates_found = Gauge(
     "bronson_move_duplicates_found",
     "Number of duplicate subdirectories found during move operation",
-    ["cleanup_directory", "target_directory"],
+    ["cleanup_directory", "target_directory", "dry_run"],
 )
 
 move_directories_moved = Gauge(
     "bronson_move_directories_moved",
     "Number of directories successfully moved",
-    ["cleanup_directory", "target_directory"],
+    ["cleanup_directory", "target_directory", "dry_run"],
 )
 
 bronson_info = Gauge("bronson_info", "Info about the server", ["version"])
@@ -447,7 +447,9 @@ async def cleanup_unwanted_files(
                     file_path.unlink()
                     removed_files.append(file_path_str)
                     cleanup_files_removed_total.labels(
-                        directory=cleanup_dir, pattern=pattern
+                        directory=cleanup_dir,
+                        pattern=pattern,
+                        dry_run=str(dry_run).lower(),
                     ).inc()
                     # Note: Current files gauge will be updated after all removals
                 except Exception as e:
@@ -470,21 +472,29 @@ async def cleanup_unwanted_files(
             for pattern in patterns:
                 count = pattern_counts.get(pattern, 0)
                 cleanup_files_found_total.labels(
-                    directory=cleanup_dir, pattern=pattern
+                    directory=cleanup_dir,
+                    pattern=pattern,
+                    dry_run=str(dry_run).lower(),
                 ).inc(count)
                 # Set current files gauge
                 cleanup_current_files.labels(
-                    directory=cleanup_dir, pattern=pattern
+                    directory=cleanup_dir,
+                    pattern=pattern,
+                    dry_run=str(dry_run).lower(),
                 ).set(count)
         else:
             # Zero out metrics for each pattern when no files are found
             for pattern in patterns:
                 cleanup_files_found_total.labels(
-                    directory=cleanup_dir, pattern=pattern
+                    directory=cleanup_dir,
+                    pattern=pattern,
+                    dry_run=str(dry_run).lower(),
                 ).inc(0)
                 # Set current files gauge to 0
                 cleanup_current_files.labels(
-                    directory=cleanup_dir, pattern=pattern
+                    directory=cleanup_dir,
+                    pattern=pattern,
+                    dry_run=str(dry_run).lower(),
                 ).set(0)
 
         # Update current files gauge after removal
@@ -497,7 +507,9 @@ async def cleanup_unwanted_files(
 
             for pattern in removed_patterns:
                 cleanup_current_files.labels(
-                    directory=cleanup_dir, pattern=pattern
+                    directory=cleanup_dir,
+                    pattern=pattern,
+                    dry_run=str(dry_run).lower(),
                 ).set(0)
 
         # Record operation duration
@@ -728,7 +740,9 @@ async def move_non_duplicate_files(dry_run: bool = True):
 
         # Record gauge metrics for duplicates found and directories moved
         move_duplicates_found.labels(
-            cleanup_directory=cleanup_dir, target_directory=target_dir
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            dry_run=str(dry_run).lower(),
         ).set(len(duplicates))
 
         moved_files = []
@@ -764,7 +778,9 @@ async def move_non_duplicate_files(dry_run: bool = True):
 
         # Record gauge metric for directories moved
         move_directories_moved.labels(
-            cleanup_directory=cleanup_dir, target_directory=target_dir
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            dry_run=str(dry_run).lower(),
         ).set(len(moved_files))
 
         # Record operation duration

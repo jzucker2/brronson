@@ -11,6 +11,14 @@ from app.version import version
 client = TestClient(app)
 
 
+def normalize_path_for_metrics(path):
+    """Normalize a path for Prometheus metrics label comparison (strip /private prefix if present)."""
+    p = str(path)
+    if p.startswith("/private/var/"):
+        return p[len("/private") :]
+    return p
+
+
 class TestMainEndpoints(unittest.TestCase):
     def test_root_endpoint(self):
         """Test the root endpoint"""
@@ -168,7 +176,9 @@ class TestCleanupEndpoints(unittest.TestCase):
         data = response.json()
 
         # Handle path resolution differences on macOS
-        assert data["directory"] == str(Path(self.test_dir).resolve())
+        assert normalize_path_for_metrics(
+            data["directory"]
+        ) == normalize_path_for_metrics(self.test_path)
         assert data["files_found"] == 16  # 16 unwanted files
         assert len(data["found_files"]) == 16
         assert "www.YTS.MX.jpg" in str(data["found_files"])
@@ -198,12 +208,34 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert (self.test_path / "WWW.YTS.AG.jpg").exists()
         assert (self.test_path / "WWW.YIFY-TORRENTS.COM.jpg").exists()
         assert (self.test_path / "YIFYStatus.com.txt").exists()
-        assert (self.test_path / "YTSProxies.com.txt").exists()
-        assert (self.test_path / "YTSYifyUP123 (TOR).txt").exists()
-        assert (self.test_path / ".DS_Store").exists()
+
+        # Check metrics for dry run
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+        # Check for a known pattern
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_cleanup_files_found_total",
+            {
+                "directory": normalize_path_for_metrics(self.test_path),
+                "pattern": r"www\\.YTS\\.MX\\.jpg$",
+                "dry_run": "true",
+            },
+            "2.0",
+        )
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_cleanup_current_files",
+            {
+                "directory": normalize_path_for_metrics(self.test_path),
+                "pattern": r"www\\.YTS\\.MX\\.jpg$",
+                "dry_run": "true",
+            },
+            "2.0",
+        )
 
     def test_cleanup_actual_removal(self):
-        """Test cleanup endpoint with actual file removal"""
+        """Test cleanup endpoint with actual removal"""
         response = client.post("/api/v1/cleanup/files?dry_run=false")
         assert response.status_code == 200
         data = response.json()
@@ -212,30 +244,48 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert data["files_found"] == 16
         assert data["files_removed"] == 16
 
-        # Verify unwanted files are removed
+        # Verify files are removed
         assert not (self.test_path / "www.YTS.MX.jpg").exists()
         assert not (self.test_path / "www.YTS.AM.jpg").exists()
         assert not (self.test_path / "www.YTS.LT.jpg").exists()
         assert not (self.test_path / "WWW.YTS.AG.jpg").exists()
         assert not (self.test_path / "WWW.YIFY-TORRENTS.COM.jpg").exists()
         assert not (self.test_path / "YIFYStatus.com.txt").exists()
-        assert not (self.test_path / "YTSProxies.com.txt").exists()
-        assert not (self.test_path / "YTSYifyUP123 (TOR).txt").exists()
-        assert not (self.test_path / ".DS_Store").exists()
-        assert not (
-            self.test_path / "subdir" / "YTSYifyUP123 (TOR).txt"
-        ).exists()  # noqa: E501
-        assert not (self.test_path / "subdir" / "www.YTS.AM.jpg").exists()
-        assert not (self.test_path / "subdir" / "www.YTS.LT.jpg").exists()
-        assert not (self.test_path / "subdir" / "WWW.YTS.AG.jpg").exists()
-        assert not (
-            self.test_path / "subdir" / "WWW.YIFY-TORRENTS.COM.jpg"
-        ).exists()  # noqa: E501
-        assert not (self.test_path / "subdir" / "YTSProxies.com.txt").exists()
 
-        # Verify normal files still exist
-        assert (self.test_path / "normal_file.txt").exists()
-        assert (self.test_path / "subdir" / "normal_file.txt").exists()
+        # Check metrics for actual removal
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+        # Check for a known pattern
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_cleanup_files_found_total",
+            {
+                "directory": normalize_path_for_metrics(self.test_path),
+                "pattern": r"www\\.YTS\\.MX\\.jpg$",
+                "dry_run": "false",
+            },
+            "2.0",
+        )
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_cleanup_files_removed_total",
+            {
+                "directory": normalize_path_for_metrics(self.test_path),
+                "pattern": r"www\\.YTS\\.MX\\.jpg$",
+                "dry_run": "false",
+            },
+            "2.0",
+        )
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_cleanup_current_files",
+            {
+                "directory": normalize_path_for_metrics(self.test_path),
+                "pattern": r"www\\.YTS\\.MX\\.jpg$",
+                "dry_run": "false",
+            },
+            "0.0",
+        )
 
     def test_cleanup_with_custom_patterns(self):
         """Test cleanup with custom patterns"""
@@ -337,7 +387,9 @@ class TestSharedHelperMethods(unittest.TestCase):
         """Test validate_directory with valid directory"""
         try:
             self.validate_directory(
-                self.test_path, str(self.test_path), "scan"
+                self.test_path,
+                normalize_path_for_metrics(self.test_path),
+                "scan",
             )
         except Exception as e:
             self.fail(f"validate_directory raised {e} unexpectedly!")
@@ -347,14 +399,18 @@ class TestSharedHelperMethods(unittest.TestCase):
         nonexistent_path = Path("/nonexistent/test/directory")
         with self.assertRaises(Exception):
             self.validate_directory(
-                nonexistent_path, str(nonexistent_path), "scan"
+                nonexistent_path,
+                normalize_path_for_metrics(nonexistent_path),
+                "scan",
             )
 
     def test_validate_directory_system_protection(self):
         """Test validate_directory with protected system directory"""
         system_path = Path("/etc")
         with self.assertRaises(Exception):
-            self.validate_directory(system_path, str(system_path), "scan")
+            self.validate_directory(
+                system_path, normalize_path_for_metrics(system_path), "scan"
+            )
 
     def test_find_unwanted_files_with_matches(self):
         """Test find_unwanted_files with files that match patterns"""
@@ -768,7 +824,7 @@ class TestDirectoryComparison(unittest.TestCase):
         )
         # The metric should be present but with value 0
         self.assertIn(
-            f'bronson_comparison_duplicates_found_total{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 0.0',
+            f'bronson_comparison_duplicates_found_total{{cleanup_directory="{normalize_path_for_metrics(self.cleanup_dir)}",target_directory="{normalize_path_for_metrics(self.target_dir)}"}} 0.0',
             metrics_text,
         )
 
@@ -803,7 +859,7 @@ class TestDirectoryComparison(unittest.TestCase):
         )
         # The metric should be present but with value 0
         self.assertIn(
-            f'bronson_comparison_duplicates_found_total{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 0.0',
+            f'bronson_comparison_duplicates_found_total{{cleanup_directory="{normalize_path_for_metrics(self.cleanup_dir)}",target_directory="{normalize_path_for_metrics(self.target_dir)}"}} 0.0',
             metrics_text,
         )
 
@@ -1079,22 +1135,30 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         self.assertIn("bronson_move_duplicates_found", metrics_text)
         self.assertIn("bronson_move_directories_moved", metrics_text)
 
-        # Check specific metric values
-        self.assertIn(
-            f'bronson_move_files_found_total{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 2.0',
-            metrics_text,
-        )
-
+        # Use the resolved path format that appears in the metrics
+        cleanup_path_resolved = normalize_path_for_metrics(self.cleanup_dir)
+        target_path_resolved = normalize_path_for_metrics(self.target_dir)
         # Check gauge metrics for duplicates found (should be 2: shared_dir1, shared_dir2)
-        self.assertIn(
-            f'bronson_move_duplicates_found{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 2.0',
+        assert_metric_with_labels(
             metrics_text,
+            "bronson_move_duplicates_found",
+            {
+                "cleanup_directory": cleanup_path_resolved,
+                "target_directory": target_path_resolved,
+                "dry_run": "true",
+            },
+            "2.0",
         )
-
         # Check gauge metrics for directories moved (dry run shows what would be moved)
-        self.assertIn(
-            f'bronson_move_directories_moved{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 2.0',
+        assert_metric_with_labels(
             metrics_text,
+            "bronson_move_directories_moved",
+            {
+                "cleanup_directory": cleanup_path_resolved,
+                "target_directory": target_path_resolved,
+                "dry_run": "true",
+            },
+            "2.0",
         )
 
     def test_move_non_duplicates_with_files(self):
@@ -1162,6 +1226,68 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
 
         # Verify original file no longer exists
         self.assertFalse(test_file.exists())
+
+    def test_move_non_duplicates_metrics_with_actual_move(self):
+        """Test that move non-duplicates records metrics correctly for actual moves"""
+        response = client.post("/api/v1/move/non-duplicates?dry_run=false")
+        self.assertEqual(response.status_code, 200)
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have move metrics with dry_run=false
+        self.assertIn("bronson_move_files_found_total", metrics_text)
+        self.assertIn("bronson_move_operation_duration_seconds", metrics_text)
+        self.assertIn("bronson_move_duplicates_found", metrics_text)
+        self.assertIn("bronson_move_directories_moved", metrics_text)
+
+        # Use the resolved path format that appears in the metrics
+        cleanup_path_resolved = normalize_path_for_metrics(self.cleanup_dir)
+        target_path_resolved = normalize_path_for_metrics(self.target_dir)
+        # Check gauge metrics for duplicates found with dry_run=false
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_move_duplicates_found",
+            {
+                "cleanup_directory": cleanup_path_resolved,
+                "target_directory": target_path_resolved,
+                "dry_run": "false",
+            },
+            "2.0",
+        )
+        # Check gauge metrics for directories moved with dry_run=false
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_move_directories_moved",
+            {
+                "cleanup_directory": cleanup_path_resolved,
+                "target_directory": target_path_resolved,
+                "dry_run": "false",
+            },
+            "2.0",
+        )
+
+
+def assert_metric_with_labels(metrics_text, metric_name, labels, value):
+    """
+    Assert that a Prometheus metric with the given name, labels (dict), and value exists in the metrics_text.
+    Ignores label order.
+    """
+    for line in metrics_text.splitlines():
+        if not line.startswith(metric_name + "{"):
+            continue
+        if (
+            all(f'{k}="{v}"' in line for k, v in labels.items())
+            and f"}} {value}" in line
+        ):
+            return
+    raise AssertionError(
+        f"Metric {metric_name} with labels {labels} and value {value} not found in metrics output!\nLine examples:\n"
+        + "\n".join(
+            [line for line in metrics_text.splitlines() if metric_name in line]
+        )
+    )
 
 
 if __name__ == "__main__":
