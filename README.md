@@ -99,23 +99,23 @@ The cleanup directory is controlled by the `CLEANUP_DIRECTORY` environment varia
 **Scan for unwanted files:**
 
 ```bash
-curl "http://10.0.1.64:1968/api/v1/cleanup/scan"
+curl "http://localhost:1968/api/v1/cleanup/scan"
 ```
 
 **Remove unwanted files (dry run first):**
 
 ```bash
 # Dry run to see what would be deleted
-curl -X POST "http://10.0.1.64:1968/api/v1/cleanup/files?dry_run=true"
+curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=true"
 
 # Actually remove the files
-curl -X POST "http://10.0.1.64:1968/api/v1/cleanup/files?dry_run=false"
+curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false"
 ```
 
 **Use custom patterns:**
 
 ```bash
-curl -X POST "http://10.0.1.64:1968/api/v1/cleanup/files?dry_run=false" \
+curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false" \
   -H "Content-Type: application/json" \
   -d '{"patterns": ["\\.mp4$", "\\.avi$"]}'
 ```
@@ -144,13 +144,13 @@ The directory comparison endpoint helps identify duplicate subdirectories betwee
 **Compare directories (default - counts only):**
 
 ```bash
-curl "http://10.0.1.64:1968/api/v1/compare/directories"
+curl "http://localhost:1968/api/v1/compare/directories"
 ```
 
 **Compare directories with verbose output:**
 
 ```bash
-curl "http://10.0.1.64:1968/api/v1/compare/directories?verbose=true"
+curl "http://localhost:1968/api/v1/compare/directories?verbose=true"
 ```
 
 **Response format (default):**
@@ -206,13 +206,13 @@ The file move endpoint helps move non-duplicate subdirectories from the cleanup 
 **Move non-duplicate directories (dry run - default):**
 
 ```bash
-curl -X POST "http://10.0.1.64:1968/api/v1/move/non-duplicates"
+curl -X POST "http://localhost:1968/api/v1/move/non-duplicates"
 ```
 
 **Move non-duplicate directories (actual move):**
 
 ```bash
-curl -X POST "http://10.0.1.64:1968/api/v1/move/non-duplicates?dry_run=false"
+curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false"
 ```
 
 **Response format:**
