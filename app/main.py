@@ -119,6 +119,12 @@ comparison_duplicates_found_total = Gauge(
     ["cleanup_directory", "target_directory"],
 )
 
+comparison_non_duplicates_found_total = Gauge(
+    "bronson_comparison_non_duplicates_found_total",
+    "Current number of non-duplicate subdirectories in cleanup directory",
+    ["cleanup_directory", "target_directory"],
+)
+
 comparison_errors_total = Counter(
     "bronson_comparison_errors_total",
     "Total number of errors during directory comparison",
@@ -655,11 +661,15 @@ async def compare_directories(verbose: bool = False):
         cleanup_set = set(cleanup_subdirs)
         target_set = set(target_subdirs)
         duplicates = list(cleanup_set.intersection(target_set))
+        non_duplicates = list(cleanup_set - target_set)
 
-        # Record metrics - only count duplicates, not all subdirectories
+        # Record metrics for duplicates and non-duplicates
         comparison_duplicates_found_total.labels(
             cleanup_directory=cleanup_dir, target_directory=target_dir
         ).set(len(duplicates))
+        comparison_non_duplicates_found_total.labels(
+            cleanup_directory=cleanup_dir, target_directory=target_dir
+        ).set(len(non_duplicates))
 
         # Record operation duration
         operation_duration = time.time() - start_time
@@ -674,6 +684,7 @@ async def compare_directories(verbose: bool = False):
             "target_directory": str(target_path),
             "duplicates": duplicates,
             "duplicate_count": len(duplicates),
+            "non_duplicate_count": len(non_duplicates),
             "total_cleanup_subdirectories": len(cleanup_subdirs),
             "total_target_subdirectories": len(target_subdirs),
         }

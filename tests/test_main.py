@@ -757,6 +757,7 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertNotIn("target_subdirectories", data)
         self.assertIn("duplicates", data)
         self.assertIn("duplicate_count", data)
+        self.assertIn("non_duplicate_count", data)
         self.assertIn("total_cleanup_subdirectories", data)
         self.assertIn("total_target_subdirectories", data)
 
@@ -764,6 +765,7 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertEqual(data["duplicate_count"], 2)
         self.assertIn("shared_dir1", data["duplicates"])
         self.assertIn("shared_dir2", data["duplicates"])
+        self.assertEqual(data["non_duplicate_count"], 1)  # cleanup_only
         self.assertEqual(data["total_cleanup_subdirectories"], 3)
         self.assertEqual(data["total_target_subdirectories"], 3)
 
@@ -780,6 +782,7 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertIn("target_subdirectories", data)
         self.assertIn("duplicates", data)
         self.assertIn("duplicate_count", data)
+        self.assertIn("non_duplicate_count", data)
         self.assertIn("total_cleanup_subdirectories", data)
         self.assertIn("total_target_subdirectories", data)
 
@@ -787,6 +790,7 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertEqual(data["duplicate_count"], 2)
         self.assertIn("shared_dir1", data["duplicates"])
         self.assertIn("shared_dir2", data["duplicates"])
+        self.assertEqual(data["non_duplicate_count"], 1)  # cleanup_only
         self.assertEqual(data["total_cleanup_subdirectories"], 3)
         self.assertEqual(data["total_target_subdirectories"], 3)
         self.assertIn("cleanup_only", data["cleanup_subdirectories"])
@@ -809,6 +813,7 @@ class TestDirectoryComparison(unittest.TestCase):
         # Check response data
         self.assertEqual(data["duplicate_count"], 0)
         self.assertEqual(len(data["duplicates"]), 0)
+        self.assertEqual(data["non_duplicate_count"], 1)  # cleanup_only
         self.assertEqual(
             data["total_cleanup_subdirectories"], 1
         )  # cleanup_only
@@ -846,6 +851,7 @@ class TestDirectoryComparison(unittest.TestCase):
 
         # Check response data
         self.assertEqual(data["duplicate_count"], 0)
+        self.assertEqual(data["non_duplicate_count"], 0)
         self.assertEqual(data["total_cleanup_subdirectories"], 0)
         self.assertEqual(data["total_target_subdirectories"], 0)
 
@@ -891,10 +897,39 @@ class TestDirectoryComparison(unittest.TestCase):
             "bronson_comparison_duplicates_found_total", metrics_text
         )
         self.assertIn(
+            "bronson_comparison_non_duplicates_found_total", metrics_text
+        )
+        self.assertIn(
             "bronson_comparison_operation_duration_seconds", metrics_text
         )
         # Should NOT have subdirectory metrics for comparison operations
-        # (only duplicates are counted, not all subdirectories)
+        # (only duplicates and non-duplicates are counted, not all subdirectories)
+
+        # Check specific metric values
+        cleanup_path_resolved = normalize_path_for_metrics(self.cleanup_dir)
+        target_path_resolved = normalize_path_for_metrics(self.target_dir)
+
+        # Check duplicates metric (should be 2: shared_dir1, shared_dir2)
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_comparison_duplicates_found_total",
+            {
+                "cleanup_directory": cleanup_path_resolved,
+                "target_directory": target_path_resolved,
+            },
+            "2.0",
+        )
+
+        # Check non-duplicates metric (should be 1: cleanup_only)
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_comparison_non_duplicates_found_total",
+            {
+                "cleanup_directory": cleanup_path_resolved,
+                "target_directory": target_path_resolved,
+            },
+            "1.0",
+        )
 
     def test_compare_directories_with_files(self):
         """Test that directory comparison

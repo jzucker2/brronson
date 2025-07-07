@@ -161,6 +161,7 @@ curl "http://localhost:1968/api/v1/compare/directories?verbose=true"
   "target_directory": "/path/to/target",
   "duplicates": ["dir2"],
   "duplicate_count": 1,
+  "non_duplicate_count": 2,
   "total_cleanup_subdirectories": 3,
   "total_target_subdirectories": 3
 }
@@ -176,6 +177,7 @@ curl "http://localhost:1968/api/v1/compare/directories?verbose=true"
   "target_subdirectories": ["dir2", "dir4", "dir5"],
   "duplicates": ["dir2"],
   "duplicate_count": 1,
+  "non_duplicate_count": 2,
   "total_cleanup_subdirectories": 3,
   "total_target_subdirectories": 3
 }
@@ -281,9 +283,9 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 
 #### Directory Comparison Metrics
 
-- `bronson_comparison_duplicates_found_total` - Current number of duplicate subdirectories found
-- `bronson_comparison_errors_total` - Total errors during directory comparison
-- `bronson_comparison_operation_duration_seconds` - Time spent on directory comparison operations
+- `bronson_comparison_duplicates_found_total` - Current number of duplicate subdirectories found between directories (labels: cleanup_directory, target_directory)
+- `bronson_comparison_non_duplicates_found_total` - Current number of non-duplicate subdirectories in cleanup directory (labels: cleanup_directory, target_directory)
+- `bronson_comparison_operation_duration_seconds` - Time spent on directory comparison operations (labels: operation_type, cleanup_directory, target_directory)
 
 #### File Move Metrics
 
