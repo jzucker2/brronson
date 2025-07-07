@@ -103,7 +103,6 @@ class TestMainEndpoints(unittest.TestCase):
         client.get("/")
         response = client.get("/metrics")
         metrics_text = response.text
-        print(metrics_text)
 
         # Check for request duration metrics
         assert "http_request_duration_seconds" in metrics_text
