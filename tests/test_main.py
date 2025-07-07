@@ -1028,22 +1028,26 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         self.assertIn("cleanup_directory", data)
         self.assertIn("target_directory", data)
         self.assertIn("dry_run", data)
+        self.assertIn("batch_size", data)
         self.assertIn("non_duplicates_found", data)
         self.assertIn("files_moved", data)
         self.assertIn("errors", data)
         self.assertIn("non_duplicate_subdirectories", data)
         self.assertIn("moved_subdirectories", data)
         self.assertIn("error_details", data)
+        self.assertIn("remaining_files", data)
 
         # Check expected results (dry run)
         self.assertTrue(data["dry_run"])
+        self.assertEqual(data["batch_size"], 1)  # Default batch size
         self.assertEqual(
             data["non_duplicates_found"], 2
         )  # cleanup_only, another_cleanup_only
         self.assertEqual(
-            data["files_moved"], 2
-        )  # In dry run, shows what would be moved
+            data["files_moved"], 1
+        )  # In dry run with batch_size=1, only 1 file moved
         self.assertEqual(data["errors"], 0)
+        self.assertEqual(data["remaining_files"], 1)  # 1 file remaining
         self.assertIn("cleanup_only", data["non_duplicate_subdirectories"])
         self.assertIn(
             "another_cleanup_only", data["non_duplicate_subdirectories"]
@@ -1059,6 +1063,25 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
 
     def test_move_non_duplicates_actual_move(self):
         """Test move non-duplicates endpoint with actual file moving"""
+        # Ensure we have the expected setup - clean state
+        import shutil
+
+        # Clean up any existing directories from previous tests
+        if (self.target_dir / "cleanup_only").exists():
+            shutil.rmtree(self.target_dir / "cleanup_only")
+        if (self.target_dir / "another_cleanup_only").exists():
+            shutil.rmtree(self.target_dir / "another_cleanup_only")
+        if (self.cleanup_dir / "cleanup_only").exists():
+            shutil.rmtree(self.cleanup_dir / "cleanup_only")
+        if (self.cleanup_dir / "another_cleanup_only").exists():
+            shutil.rmtree(self.cleanup_dir / "another_cleanup_only")
+
+        # Recreate the expected directories with files
+        (self.cleanup_dir / "cleanup_only").mkdir()
+        (self.cleanup_dir / "cleanup_only" / "file1.txt").touch()
+        (self.cleanup_dir / "another_cleanup_only").mkdir()
+        (self.cleanup_dir / "another_cleanup_only" / "file2.txt").touch()
+
         response = client.post("/api/v1/move/non-duplicates?dry_run=false")
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -1067,28 +1090,38 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         self.assertIn("cleanup_directory", data)
         self.assertIn("target_directory", data)
         self.assertIn("dry_run", data)
+        self.assertIn("batch_size", data)
         self.assertIn("non_duplicates_found", data)
         self.assertIn("files_moved", data)
         self.assertIn("errors", data)
         self.assertIn("non_duplicate_subdirectories", data)
         self.assertIn("moved_subdirectories", data)
         self.assertIn("error_details", data)
+        self.assertIn("remaining_files", data)
 
         # Check expected results (actual move)
         self.assertFalse(data["dry_run"])
+        self.assertEqual(data["batch_size"], 1)  # Default batch size
         self.assertEqual(data["non_duplicates_found"], 2)
-        self.assertEqual(data["files_moved"], 2)
+        self.assertEqual(
+            data["files_moved"], 1
+        )  # Only 1 file moved due to batch_size=1
         self.assertEqual(data["errors"], 0)
+        self.assertEqual(data["remaining_files"], 1)  # 1 file remaining
         self.assertIn("cleanup_only", data["non_duplicate_subdirectories"])
         self.assertIn(
             "another_cleanup_only", data["non_duplicate_subdirectories"]
         )
 
-        # Verify files were actually moved
+        # Verify files were actually moved (only first file due to batch_size=1)
         self.assertFalse((self.cleanup_dir / "cleanup_only").exists())
-        self.assertFalse((self.cleanup_dir / "another_cleanup_only").exists())
+        self.assertTrue(
+            (self.cleanup_dir / "another_cleanup_only").exists()
+        )  # Not moved yet
         self.assertTrue((self.target_dir / "cleanup_only").exists())
-        self.assertTrue((self.target_dir / "another_cleanup_only").exists())
+        self.assertFalse(
+            (self.target_dir / "another_cleanup_only").exists()
+        )  # Not moved yet
 
         # Verify shared directories were not moved
         self.assertTrue((self.cleanup_dir / "shared_dir1").exists())
@@ -1098,6 +1131,60 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
 
         # Verify target-only directory was not affected
         self.assertTrue((self.target_dir / "target_only").exists())
+
+    def test_move_non_duplicates_batch_processing(self):
+        """Test move non-duplicates with custom batch size"""
+        # Reset directories to have 2 non-duplicates
+        import shutil
+
+        if (self.target_dir / "cleanup_only").exists():
+            shutil.rmtree(self.target_dir / "cleanup_only")
+        if (self.target_dir / "another_cleanup_only").exists():
+            shutil.rmtree(self.target_dir / "another_cleanup_only")
+
+        response = client.post(
+            "/api/v1/move/non-duplicates?dry_run=false&batch_size=2"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check response structure
+        self.assertIn("batch_size", data)
+        self.assertIn("remaining_files", data)
+
+        # Check expected results (batch_size=2)
+        self.assertFalse(data["dry_run"])
+        self.assertEqual(data["batch_size"], 2)
+        self.assertEqual(data["non_duplicates_found"], 2)
+        self.assertEqual(
+            data["files_moved"], 2
+        )  # Both files moved due to batch_size=2
+        self.assertEqual(data["errors"], 0)
+        self.assertEqual(data["remaining_files"], 0)  # No files remaining
+
+        # Verify both files were actually moved
+        self.assertFalse((self.cleanup_dir / "cleanup_only").exists())
+        self.assertFalse((self.cleanup_dir / "another_cleanup_only").exists())
+        self.assertTrue((self.target_dir / "cleanup_only").exists())
+        self.assertTrue((self.target_dir / "another_cleanup_only").exists())
+
+        # Check batch operations metric for batch_size=2
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        cleanup_path_resolved = normalize_path_for_metrics(self.cleanup_dir)
+        target_path_resolved = normalize_path_for_metrics(self.target_dir)
+
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_move_batch_operations_total",
+            {
+                "cleanup_directory": cleanup_path_resolved,
+                "target_directory": target_path_resolved,
+                "batch_size": "2",
+            },
+            "1.0",
+        )
 
     def test_move_non_duplicates_no_non_duplicates(self):
         """Test move non-duplicates when there are no non-duplicates"""
@@ -1169,6 +1256,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         self.assertIn("bronson_move_operation_duration_seconds", metrics_text)
         self.assertIn("bronson_move_duplicates_found", metrics_text)
         self.assertIn("bronson_move_directories_moved", metrics_text)
+        self.assertIn("bronson_move_batch_operations_total", metrics_text)
 
         # Use the resolved path format that appears in the metrics
         cleanup_path_resolved = normalize_path_for_metrics(self.cleanup_dir)
@@ -1184,7 +1272,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
             },
             "2.0",
         )
-        # Check gauge metrics for directories moved (dry run shows what would be moved)
+        # Check gauge metrics for directories moved (dry run shows what would be moved, but limited by batch_size=1)
         assert_metric_with_labels(
             metrics_text,
             "bronson_move_directories_moved",
@@ -1193,7 +1281,19 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
                 "target_directory": target_path_resolved,
                 "dry_run": "true",
             },
-            "2.0",
+            "1.0",
+        )
+
+        # Check batch operations metric
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_move_batch_operations_total",
+            {
+                "cleanup_directory": cleanup_path_resolved,
+                "target_directory": target_path_resolved,
+                "batch_size": "1",
+            },
+            "1.0",
         )
 
     def test_move_non_duplicates_with_files(self):
@@ -1221,6 +1321,18 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
 
     def test_move_non_duplicates_error_handling(self):
         """Test move non-duplicates error handling"""
+        # Ensure clean state
+        import shutil
+
+        if (self.target_dir / "cleanup_only").exists():
+            shutil.rmtree(self.target_dir / "cleanup_only")
+        if (self.cleanup_dir / "cleanup_only").exists():
+            shutil.rmtree(self.cleanup_dir / "cleanup_only")
+
+        # Recreate the directory in cleanup
+        (self.cleanup_dir / "cleanup_only").mkdir()
+        (self.cleanup_dir / "cleanup_only" / "file1.txt").touch()
+
         # Create a file with the same name as a directory to cause a move error
         (
             self.target_dir / "cleanup_only"
@@ -1230,7 +1342,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
-        # Should have an error
+        # Should have an error (only the first file in batch will fail)
         self.assertGreater(data["errors"], 0)
         self.assertIn("error_details", data)
         self.assertGreater(len(data["error_details"]), 0)
@@ -1238,7 +1350,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         # Should still report the non-duplicates found
         self.assertEqual(data["non_duplicates_found"], 2)
 
-        # The file should still exist in cleanup (move failed)
+        # The first file should still exist in cleanup (move failed)
         self.assertTrue((self.cleanup_dir / "cleanup_only").exists())
         self.assertTrue(
             (self.target_dir / "cleanup_only").exists()
@@ -1247,6 +1359,17 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
 
     def test_move_non_duplicates_preserves_file_contents(self):
         """Test that move non-duplicates preserves file contents"""
+        # Ensure clean state
+        import shutil
+
+        if (self.target_dir / "cleanup_only").exists():
+            shutil.rmtree(self.target_dir / "cleanup_only")
+        if (self.cleanup_dir / "cleanup_only").exists():
+            shutil.rmtree(self.cleanup_dir / "cleanup_only")
+
+        # Recreate the directory in cleanup
+        (self.cleanup_dir / "cleanup_only").mkdir()
+
         # Create a file with specific content
         test_file = self.cleanup_dir / "cleanup_only" / "test_content.txt"
         test_file.write_text("This is test content")
@@ -1254,7 +1377,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         response = client.post("/api/v1/move/non-duplicates?dry_run=false")
         self.assertEqual(response.status_code, 200)
 
-        # Verify the file was moved and content preserved
+        # Verify the file was moved and content preserved (only first file due to batch_size=1)
         moved_file = self.target_dir / "cleanup_only" / "test_content.txt"
         self.assertTrue(moved_file.exists())
         self.assertEqual(moved_file.read_text(), "This is test content")
@@ -1276,6 +1399,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         self.assertIn("bronson_move_operation_duration_seconds", metrics_text)
         self.assertIn("bronson_move_duplicates_found", metrics_text)
         self.assertIn("bronson_move_directories_moved", metrics_text)
+        self.assertIn("bronson_move_batch_operations_total", metrics_text)
 
         # Use the resolved path format that appears in the metrics
         cleanup_path_resolved = normalize_path_for_metrics(self.cleanup_dir)
@@ -1291,7 +1415,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
             },
             "2.0",
         )
-        # Check gauge metrics for directories moved with dry_run=false
+        # Check gauge metrics for directories moved with dry_run=false (limited by batch_size=1)
         assert_metric_with_labels(
             metrics_text,
             "bronson_move_directories_moved",
@@ -1300,7 +1424,19 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
                 "target_directory": target_path_resolved,
                 "dry_run": "false",
             },
-            "2.0",
+            "1.0",
+        )
+
+        # Check batch operations metric
+        assert_metric_with_labels(
+            metrics_text,
+            "bronson_move_batch_operations_total",
+            {
+                "cleanup_directory": cleanup_path_resolved,
+                "target_directory": target_path_resolved,
+                "batch_size": "1",
+            },
+            "1.0",
         )
 
 

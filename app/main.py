@@ -181,6 +181,12 @@ move_directories_moved = Gauge(
     ["cleanup_directory", "target_directory", "dry_run"],
 )
 
+move_batch_operations_total = Counter(
+    "bronson_move_batch_operations_total",
+    "Total number of batch operations performed",
+    ["cleanup_directory", "target_directory", "batch_size"],
+)
+
 bronson_info = Gauge("bronson_info", "Info about the server", ["version"])
 
 
@@ -711,7 +717,7 @@ async def compare_directories(verbose: bool = False):
 
 
 @app.post("/api/v1/move/non-duplicates")
-async def move_non_duplicate_files(dry_run: bool = True):
+async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
     """
     Move non-duplicate files from CLEANUP_DIRECTORY to TARGET_DIRECTORY.
 
@@ -720,6 +726,7 @@ async def move_non_duplicate_files(dry_run: bool = True):
 
     Args:
         dry_run: If True, only show what would be moved (default: True)
+        batch_size: Number of files to move per request (default: 1)
     """
     start_time = time.time()
 
@@ -758,9 +765,14 @@ async def move_non_duplicate_files(dry_run: bool = True):
 
         moved_files = []
         errors = []
+        processed_count = 0
 
-        # Process non-duplicate subdirectories for moving
+        # Process non-duplicate subdirectories for moving in batches
         for subdir_name in non_duplicates:
+            # Check if we've reached the batch limit
+            if processed_count >= batch_size:
+                break
+
             source_path = cleanup_path / subdir_name
             target_path_subdir = target_path / subdir_name
 
@@ -787,12 +799,21 @@ async def move_non_duplicate_files(dry_run: bool = True):
                 # In dry run mode, just add to moved_files for reporting
                 moved_files.append(subdir_name)
 
+            processed_count += 1
+
         # Record gauge metric for directories moved
         move_directories_moved.labels(
             cleanup_directory=cleanup_dir,
             target_directory=target_dir,
             dry_run=str(dry_run).lower(),
         ).set(len(moved_files))
+
+        # Record batch operation metric
+        move_batch_operations_total.labels(
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            batch_size=str(batch_size),
+        ).inc()
 
         # Record operation duration
         operation_duration = time.time() - start_time
@@ -806,12 +827,14 @@ async def move_non_duplicate_files(dry_run: bool = True):
             "cleanup_directory": str(cleanup_path),
             "target_directory": str(target_path),
             "dry_run": dry_run,
+            "batch_size": batch_size,
             "non_duplicates_found": len(non_duplicates),
             "files_moved": len(moved_files),
             "errors": len(errors),
             "non_duplicate_subdirectories": non_duplicates,
             "moved_subdirectories": moved_files,
             "error_details": errors,
+            "remaining_files": len(non_duplicates) - processed_count,
         }
 
     except HTTPException:

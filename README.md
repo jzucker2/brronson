@@ -217,6 +217,12 @@ curl -X POST "http://localhost:1968/api/v1/move/non-duplicates"
 curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false"
 ```
 
+**Move non-duplicate directories with custom batch size:**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false&batch_size=5"
+```
+
 **Response format:**
 
 ```json
@@ -224,23 +230,27 @@ curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false"
   "cleanup_directory": "/path/to/cleanup",
   "target_directory": "/path/to/target",
   "dry_run": true,
+  "batch_size": 1,
   "non_duplicates_found": 2,
-  "files_moved": 2,
+  "files_moved": 1,
   "errors": 0,
   "non_duplicate_subdirectories": ["cleanup_only", "another_cleanup_only"],
-  "moved_subdirectories": ["cleanup_only", "another_cleanup_only"],
-  "error_details": []
+  "moved_subdirectories": ["cleanup_only"],
+  "error_details": [],
+  "remaining_files": 1
 }
 ```
 
 **Features:**
 
 - **Safe by Default**: Default `dry_run=true` prevents accidental moves
+- **Batch Processing**: Default `batch_size=1` processes one file at a time for controlled operations
 - **Duplicate Detection**: Only moves subdirectories that don't exist in target directory
 - **Error Handling**: Comprehensive error reporting for failed moves
 - **File Preservation**: Preserves all file contents during moves
 - **Cross-Device Support**: Uses `shutil.move()` for cross-device compatibility
 - **Detailed Reporting**: Provides complete information about what was moved
+- **Progress Tracking**: `remaining_files` field shows how many files still need to be moved
 - **Prometheus Metrics**: Records move operations and duplicate counts
 
 **Safety Features:**
@@ -289,12 +299,13 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 
 #### File Move Metrics
 
-- `bronson_move_files_found_total` - Total files found for moving
-- `bronson_move_files_moved_total` - Total files successfully moved
-- `bronson_move_errors_total` - Total errors during file move operations
-- `bronson_move_operation_duration_seconds` - Time spent on file move operations
+- `bronson_move_files_found_total` - Total files found for moving (labels: cleanup_directory, target_directory)
+- `bronson_move_files_moved_total` - Total files successfully moved (labels: cleanup_directory, target_directory)
+- `bronson_move_errors_total` - Total errors during file move operations (labels: cleanup_directory, target_directory, error_type)
+- `bronson_move_operation_duration_seconds` - Time spent on file move operations (labels: operation_type, cleanup_directory, target_directory)
 - `bronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation (labels: cleanup_directory, target_directory, dry_run)
 - `bronson_move_directories_moved` - Number of directories successfully moved (labels: cleanup_directory, target_directory, dry_run)
+- `bronson_move_batch_operations_total` - Total number of batch operations performed (labels: cleanup_directory, target_directory, batch_size)
 
 The metrics endpoint is automatically exposed at `/metrics` and supports gzip compression for efficient data transfer.
 
