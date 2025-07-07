@@ -460,3 +460,35 @@ docker-compose up app
 ## License
 
 This project is licensed under the MIT License.
+
+## Configuration
+
+The application can be configured using environment variables:
+
+- `CLEANUP_DIRECTORY`: Directory to scan for unwanted files (default: `/data`)
+- `TARGET_DIRECTORY`: Directory to move non-duplicate files to (default: `/target`)
+- `ENABLE_METRICS`: Enable Prometheus metrics (default: `true`)
+- `PROMETHEUS_MULTIPROC_DIR`: Directory for Prometheus multiprocess mode (default: `/tmp`)
+
+### Logging Configuration
+
+The application includes a configurable logging framework with the following environment variables:
+
+- `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) (default: `INFO`)
+- `LOG_FILE`: Name of the log file (default: `bronson.log`)
+- `LOG_FORMAT`: Log message format (default: `%(asctime)s - %(name)s - %(levelname)s - %(message)s`)
+
+Logs are written to both console and a rotating file in the `logs/` directory. The log file is automatically rotated when it reaches 10MB and keeps up to 5 backup files.
+
+### Example Log Output
+
+```
+2024-01-15 10:30:15 - app.main - INFO - Starting Bronson application version 1.0.0
+2024-01-15 10:30:15 - app.main - INFO - Cleanup directory: /data
+2024-01-15 10:30:15 - app.main - INFO - Target directory: /target
+2024-01-15 10:30:20 - app.main - INFO - Move operation: Found 3 subdirectories in cleanup, 1 in target
+2024-01-15 10:30:20 - app.main - INFO - Move analysis: 1 duplicates, 2 non-duplicates to move
+2024-01-15 10:30:20 - app.main - INFO - Directories to move: cleanup_only, another_cleanup_only
+2024-01-15 10:30:20 - app.main - INFO - Starting to move directory: cleanup_only from /data/cleanup_only to /target/cleanup_only
+2024-01-15 10:30:20 - app.main - INFO - Successfully finished moving directory: cleanup_only
+```
