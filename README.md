@@ -76,6 +76,7 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 - `POST /api/v1/items` - Create a new item
 - `GET /api/v1/items/{item_id}` - Get a specific item by ID
 - `GET /api/v1/compare/directories` - Compare subdirectories between directories
+- `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories between directories
 
 ### File Cleanup Endpoints
 
@@ -189,6 +190,65 @@ curl "http://localhost:1968/api/v1/compare/directories?verbose=true"
 - Safe operation - read-only, no modifications
 - Detailed response with comprehensive directory information
 
+### File Move Endpoints
+
+- `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories from CLEANUP_DIRECTORY to TARGET_DIRECTORY
+
+#### File Move Usage
+
+The file move endpoint helps move non-duplicate subdirectories from the cleanup directory to the target directory, reusing the existing directory comparison logic.
+
+**Configuration:**
+
+- `CLEANUP_DIRECTORY` - Source directory containing subdirectories to move (default: `/tmp`)
+- `TARGET_DIRECTORY` - Destination directory for non-duplicate subdirectories (default: `/tmp`)
+
+**Move non-duplicate directories (dry run - default):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/move/non-duplicates"
+```
+
+**Move non-duplicate directories (actual move):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false"
+```
+
+**Response format:**
+
+```json
+{
+  "cleanup_directory": "/path/to/cleanup",
+  "target_directory": "/path/to/target",
+  "dry_run": true,
+  "non_duplicates_found": 2,
+  "files_moved": 2,
+  "errors": 0,
+  "non_duplicate_subdirectories": ["cleanup_only", "another_cleanup_only"],
+  "moved_subdirectories": ["cleanup_only", "another_cleanup_only"],
+  "error_details": []
+}
+```
+
+**Features:**
+
+- **Safe by Default**: Default `dry_run=true` prevents accidental moves
+- **Duplicate Detection**: Only moves subdirectories that don't exist in target directory
+- **Error Handling**: Comprehensive error reporting for failed moves
+- **File Preservation**: Preserves all file contents during moves
+- **Cross-Device Support**: Uses `shutil.move()` for cross-device compatibility
+- **Detailed Reporting**: Provides complete information about what was moved
+- **Prometheus Metrics**: Records move operations and duplicate counts
+
+**Safety Features:**
+
+- Default `dry_run=true` prevents accidental moves
+- Only moves subdirectories (ignores individual files)
+- Preserves existing files in target directory
+- Comprehensive error reporting for failed operations
+- Uses existing directory validation and security checks
+
 ## Monitoring
 
 ### Health Check
@@ -203,11 +263,36 @@ The application provides a simple health check endpoint at `/health` that includ
 
 The application uses [prometheus-fastapi-instrumentator](https://github.com/trallnag/prometheus-fastapi-instrumentator) to automatically collect and expose the following Prometheus metrics:
 
+#### HTTP Metrics (Automatic)
+
 - `requests_total` - Total HTTP requests with method, handler, and status labels
 - `request_duration_seconds` - HTTP request latency with method and handler labels
 - `request_size_bytes` - Size of incoming requests
 - `response_size_bytes` - Size of outgoing responses
 - `http_requests_inprogress` - Number of requests currently being processed
+
+#### File Cleanup Metrics
+
+- `bronson_cleanup_files_found_total` - Total unwanted files found during cleanup operations
+- `bronson_cleanup_current_files` - Current number of unwanted files in directory
+- `bronson_cleanup_files_removed_total` - Total files successfully removed during cleanup
+- `bronson_cleanup_errors_total` - Total errors during file cleanup operations
+- `bronson_cleanup_operation_duration_seconds` - Time spent on cleanup operations
+
+#### Directory Comparison Metrics
+
+- `bronson_comparison_duplicates_found_total` - Current number of duplicate subdirectories found
+- `bronson_comparison_errors_total` - Total errors during directory comparison
+- `bronson_comparison_operation_duration_seconds` - Time spent on directory comparison operations
+
+#### File Move Metrics
+
+- `bronson_move_files_found_total` - Total files found for moving
+- `bronson_move_files_moved_total` - Total files successfully moved
+- `bronson_move_errors_total` - Total errors during file move operations
+- `bronson_move_operation_duration_seconds` - Time spent on file move operations
+- `bronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation
+- `bronson_move_directories_moved` - Number of directories successfully moved
 
 The metrics endpoint is automatically exposed at `/metrics` and supports gzip compression for efficient data transfer.
 

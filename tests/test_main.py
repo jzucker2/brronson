@@ -1076,10 +1076,24 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         # Should have move metrics
         self.assertIn("bronson_move_files_found_total", metrics_text)
         self.assertIn("bronson_move_operation_duration_seconds", metrics_text)
+        self.assertIn("bronson_move_duplicates_found", metrics_text)
+        self.assertIn("bronson_move_directories_moved", metrics_text)
 
         # Check specific metric values
         self.assertIn(
             f'bronson_move_files_found_total{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 2.0',
+            metrics_text,
+        )
+
+        # Check gauge metrics for duplicates found (should be 2: shared_dir1, shared_dir2)
+        self.assertIn(
+            f'bronson_move_duplicates_found{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 2.0',
+            metrics_text,
+        )
+
+        # Check gauge metrics for directories moved (dry run shows what would be moved)
+        self.assertIn(
+            f'bronson_move_directories_moved{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 2.0',
             metrics_text,
         )
 

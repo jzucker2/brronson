@@ -163,6 +163,18 @@ move_operation_duration = Histogram(
     ["operation_type", "cleanup_directory", "target_directory"],
 )
 
+move_duplicates_found = Gauge(
+    "bronson_move_duplicates_found",
+    "Number of duplicate subdirectories found during move operation",
+    ["cleanup_directory", "target_directory"],
+)
+
+move_directories_moved = Gauge(
+    "bronson_move_directories_moved",
+    "Number of directories successfully moved",
+    ["cleanup_directory", "target_directory"],
+)
+
 bronson_info = Gauge("bronson_info", "Info about the server", ["version"])
 
 
@@ -707,11 +719,17 @@ async def move_non_duplicate_files(dry_run: bool = True):
         cleanup_set = set(cleanup_subdirs)
         target_set = set(target_subdirs)
         non_duplicates = list(cleanup_set - target_set)
+        duplicates = list(cleanup_set.intersection(target_set))
 
         # Record metrics for files found
         move_files_found_total.labels(
             cleanup_directory=cleanup_dir, target_directory=target_dir
         ).inc(len(non_duplicates))
+
+        # Record gauge metrics for duplicates found and directories moved
+        move_duplicates_found.labels(
+            cleanup_directory=cleanup_dir, target_directory=target_dir
+        ).set(len(duplicates))
 
         moved_files = []
         errors = []
@@ -743,6 +761,11 @@ async def move_non_duplicate_files(dry_run: bool = True):
             else:
                 # In dry run mode, just add to moved_files for reporting
                 moved_files.append(subdir_name)
+
+        # Record gauge metric for directories moved
+        move_directories_moved.labels(
+            cleanup_directory=cleanup_dir, target_directory=target_dir
+        ).set(len(moved_files))
 
         # Record operation duration
         operation_duration = time.time() - start_time
