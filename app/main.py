@@ -138,6 +138,31 @@ subdirectories_found_total = Counter(
     ["directory", "operation_type"],
 )
 
+# Custom Prometheus metrics for file move operations
+move_files_found_total = Counter(
+    "bronson_move_files_found_total",
+    "Total number of files found for moving",
+    ["cleanup_directory", "target_directory"],
+)
+
+move_files_moved_total = Counter(
+    "bronson_move_files_moved_total",
+    "Total number of files successfully moved",
+    ["cleanup_directory", "target_directory"],
+)
+
+move_errors_total = Counter(
+    "bronson_move_errors_total",
+    "Total number of errors during file move operations",
+    ["cleanup_directory", "target_directory", "error_type"],
+)
+
+move_operation_duration = Histogram(
+    "bronson_move_operation_duration_seconds",
+    "Time spent on file move operations",
+    ["operation_type", "cleanup_directory", "target_directory"],
+)
+
 bronson_info = Gauge("bronson_info", "Info about the server", ["version"])
 
 
@@ -647,6 +672,110 @@ async def compare_directories(verbose: bool = False):
         raise HTTPException(
             status_code=500,
             detail=f"Error during directory comparison: {str(e)}",
+        )
+
+
+@app.post("/api/v1/move/non-duplicates")
+async def move_non_duplicate_files(dry_run: bool = True):
+    """
+    Move non-duplicate files from CLEANUP_DIRECTORY to TARGET_DIRECTORY.
+
+    This function identifies subdirectories that exist in the cleanup directory
+    but not in the target directory, and moves them to the target directory.
+
+    Args:
+        dry_run: If True, only show what would be moved (default: True)
+    """
+    start_time = time.time()
+
+    cleanup_dir = get_cleanup_directory()
+    target_dir = get_target_directory()
+
+    try:
+        cleanup_path = Path(cleanup_dir).resolve()
+        target_path = Path(target_dir).resolve()
+
+        # Validate both directories
+        validate_directory(cleanup_path, cleanup_dir, "comparison")
+        validate_directory(target_path, target_dir, "comparison")
+
+        # Get subdirectories from both directories (reusing existing functionality)
+        cleanup_subdirs = get_subdirectories(cleanup_path, "move")
+        target_subdirs = get_subdirectories(target_path, "move")
+
+        # Find non-duplicates (subdirectories that exist in cleanup but not in target)
+        cleanup_set = set(cleanup_subdirs)
+        target_set = set(target_subdirs)
+        non_duplicates = list(cleanup_set - target_set)
+
+        # Record metrics for files found
+        move_files_found_total.labels(
+            cleanup_directory=cleanup_dir, target_directory=target_dir
+        ).inc(len(non_duplicates))
+
+        moved_files = []
+        errors = []
+
+        # Process non-duplicate subdirectories for moving
+        for subdir_name in non_duplicates:
+            source_path = cleanup_path / subdir_name
+            target_path_subdir = target_path / subdir_name
+
+            if not dry_run:
+                try:
+                    # Use shutil.move for cross-device moves if needed
+                    import shutil
+
+                    shutil.move(str(source_path), str(target_path_subdir))
+                    moved_files.append(subdir_name)
+                    move_files_moved_total.labels(
+                        cleanup_directory=cleanup_dir,
+                        target_directory=target_dir,
+                    ).inc()
+                except Exception as e:
+                    error_msg = f"Failed to move {subdir_name}: {str(e)}"
+                    errors.append(error_msg)
+                    move_errors_total.labels(
+                        cleanup_directory=cleanup_dir,
+                        target_directory=target_dir,
+                        error_type="file_move_error",
+                    ).inc()
+            else:
+                # In dry run mode, just add to moved_files for reporting
+                moved_files.append(subdir_name)
+
+        # Record operation duration
+        operation_duration = time.time() - start_time
+        move_operation_duration.labels(
+            operation_type="move",
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+        ).observe(operation_duration)
+
+        return {
+            "cleanup_directory": str(cleanup_path),
+            "target_directory": str(target_path),
+            "dry_run": dry_run,
+            "non_duplicates_found": len(non_duplicates),
+            "files_moved": len(moved_files),
+            "errors": len(errors),
+            "non_duplicate_subdirectories": non_duplicates,
+            "moved_subdirectories": moved_files,
+            "error_details": errors,
+        }
+
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 404 for missing directories) as-is
+        raise
+    except Exception as e:
+        move_errors_total.labels(
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            error_type="operation_error",
+        ).inc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error during file move operation: {str(e)}",
         )
 
 

@@ -861,5 +861,294 @@ class TestDirectoryComparison(unittest.TestCase):
         self.assertNotIn(another_file, cleanup_subdirs)
 
 
+class TestMoveNonDuplicateFiles(unittest.TestCase):
+    def setUp(self):
+        """Set up test directories for move operations"""
+        self.test_dir = tempfile.mkdtemp()
+        self.cleanup_dir = Path(self.test_dir) / "cleanup"
+        self.target_dir = Path(self.test_dir) / "target"
+
+        # Create test directories
+        self.cleanup_dir.mkdir()
+        self.target_dir.mkdir()
+
+        # Create subdirectories in cleanup directory
+        (self.cleanup_dir / "cleanup_only").mkdir()
+        (self.cleanup_dir / "shared_dir1").mkdir()
+        (self.cleanup_dir / "shared_dir2").mkdir()
+        (self.cleanup_dir / "another_cleanup_only").mkdir()
+
+        # Create subdirectories in target directory
+        (self.target_dir / "target_only").mkdir()
+        (self.target_dir / "shared_dir1").mkdir()
+        (self.target_dir / "shared_dir2").mkdir()
+
+        # Add some files to the subdirectories
+        (self.cleanup_dir / "cleanup_only" / "file1.txt").touch()
+        (self.cleanup_dir / "shared_dir1" / "shared_file.txt").touch()
+        (self.target_dir / "shared_dir1" / "shared_file.txt").touch()
+        (self.cleanup_dir / "another_cleanup_only" / "file2.txt").touch()
+        (self.target_dir / "target_only" / "target_file.txt").touch()
+
+        # Set environment variables for testing
+        self.original_cleanup_dir = os.environ.get("CLEANUP_DIRECTORY")
+        self.original_target_dir = os.environ.get("TARGET_DIRECTORY")
+        os.environ["CLEANUP_DIRECTORY"] = str(self.cleanup_dir)
+        os.environ["TARGET_DIRECTORY"] = str(self.target_dir)
+
+        # Clear Prometheus default registry to avoid duplicate metrics
+        import prometheus_client
+
+        prometheus_client.REGISTRY._names_to_collectors.clear()
+
+        # Re-import and re-create the TestClient to pick up the new env vars
+        from importlib import reload
+
+        import app.main
+
+        reload(app.main)
+        global client
+        client = TestClient(app.main.app)
+
+    def tearDown(self):
+        """Clean up test directories and restore environment"""
+        import shutil
+
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+        # Restore original environment variables
+        if self.original_cleanup_dir is not None:
+            os.environ["CLEANUP_DIRECTORY"] = self.original_cleanup_dir
+        elif "CLEANUP_DIRECTORY" in os.environ:
+            del os.environ["CLEANUP_DIRECTORY"]
+
+        if self.original_target_dir is not None:
+            os.environ["TARGET_DIRECTORY"] = self.original_target_dir
+        elif "TARGET_DIRECTORY" in os.environ:
+            del os.environ["TARGET_DIRECTORY"]
+
+    def test_move_non_duplicates_dry_run(self):
+        """Test move non-duplicates endpoint in dry run mode (default)"""
+        response = client.post("/api/v1/move/non-duplicates")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check response structure
+        self.assertIn("cleanup_directory", data)
+        self.assertIn("target_directory", data)
+        self.assertIn("dry_run", data)
+        self.assertIn("non_duplicates_found", data)
+        self.assertIn("files_moved", data)
+        self.assertIn("errors", data)
+        self.assertIn("non_duplicate_subdirectories", data)
+        self.assertIn("moved_subdirectories", data)
+        self.assertIn("error_details", data)
+
+        # Check expected results (dry run)
+        self.assertTrue(data["dry_run"])
+        self.assertEqual(
+            data["non_duplicates_found"], 2
+        )  # cleanup_only, another_cleanup_only
+        self.assertEqual(
+            data["files_moved"], 2
+        )  # In dry run, shows what would be moved
+        self.assertEqual(data["errors"], 0)
+        self.assertIn("cleanup_only", data["non_duplicate_subdirectories"])
+        self.assertIn(
+            "another_cleanup_only", data["non_duplicate_subdirectories"]
+        )
+        self.assertNotIn("shared_dir1", data["non_duplicate_subdirectories"])
+        self.assertNotIn("shared_dir2", data["non_duplicate_subdirectories"])
+
+        # Verify files still exist in original location (dry run)
+        self.assertTrue((self.cleanup_dir / "cleanup_only").exists())
+        self.assertTrue((self.cleanup_dir / "another_cleanup_only").exists())
+        self.assertTrue((self.cleanup_dir / "shared_dir1").exists())
+        self.assertTrue((self.cleanup_dir / "shared_dir2").exists())
+
+    def test_move_non_duplicates_actual_move(self):
+        """Test move non-duplicates endpoint with actual file moving"""
+        response = client.post("/api/v1/move/non-duplicates?dry_run=false")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check response structure
+        self.assertIn("cleanup_directory", data)
+        self.assertIn("target_directory", data)
+        self.assertIn("dry_run", data)
+        self.assertIn("non_duplicates_found", data)
+        self.assertIn("files_moved", data)
+        self.assertIn("errors", data)
+        self.assertIn("non_duplicate_subdirectories", data)
+        self.assertIn("moved_subdirectories", data)
+        self.assertIn("error_details", data)
+
+        # Check expected results (actual move)
+        self.assertFalse(data["dry_run"])
+        self.assertEqual(data["non_duplicates_found"], 2)
+        self.assertEqual(data["files_moved"], 2)
+        self.assertEqual(data["errors"], 0)
+        self.assertIn("cleanup_only", data["non_duplicate_subdirectories"])
+        self.assertIn(
+            "another_cleanup_only", data["non_duplicate_subdirectories"]
+        )
+
+        # Verify files were actually moved
+        self.assertFalse((self.cleanup_dir / "cleanup_only").exists())
+        self.assertFalse((self.cleanup_dir / "another_cleanup_only").exists())
+        self.assertTrue((self.target_dir / "cleanup_only").exists())
+        self.assertTrue((self.target_dir / "another_cleanup_only").exists())
+
+        # Verify shared directories were not moved
+        self.assertTrue((self.cleanup_dir / "shared_dir1").exists())
+        self.assertTrue((self.cleanup_dir / "shared_dir2").exists())
+        self.assertTrue((self.target_dir / "shared_dir1").exists())
+        self.assertTrue((self.target_dir / "shared_dir2").exists())
+
+        # Verify target-only directory was not affected
+        self.assertTrue((self.target_dir / "target_only").exists())
+
+    def test_move_non_duplicates_no_non_duplicates(self):
+        """Test move non-duplicates when there are no non-duplicates"""
+        # Remove non-duplicate directories
+        import shutil
+
+        shutil.rmtree(self.cleanup_dir / "cleanup_only")
+        shutil.rmtree(self.cleanup_dir / "another_cleanup_only")
+
+        response = client.post("/api/v1/move/non-duplicates")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check expected results
+        self.assertEqual(data["non_duplicates_found"], 0)
+        self.assertEqual(data["files_moved"], 0)
+        self.assertEqual(data["errors"], 0)
+        self.assertEqual(len(data["non_duplicate_subdirectories"]), 0)
+        self.assertEqual(len(data["moved_subdirectories"]), 0)
+
+    def test_move_non_duplicates_empty_directories(self):
+        """Test move non-duplicates with empty directories"""
+        # Remove all subdirectories
+        import shutil
+
+        for subdir in self.cleanup_dir.iterdir():
+            if subdir.is_dir():
+                shutil.rmtree(subdir)
+        for subdir in self.target_dir.iterdir():
+            if subdir.is_dir():
+                shutil.rmtree(subdir)
+
+        response = client.post("/api/v1/move/non-duplicates")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check expected results
+        self.assertEqual(data["non_duplicates_found"], 0)
+        self.assertEqual(data["files_moved"], 0)
+        self.assertEqual(data["errors"], 0)
+        self.assertEqual(len(data["non_duplicate_subdirectories"]), 0)
+        self.assertEqual(len(data["moved_subdirectories"]), 0)
+
+    def test_move_non_duplicates_nonexistent_cleanup(self):
+        """Test move non-duplicates with nonexistent cleanup directory"""
+        os.environ["CLEANUP_DIRECTORY"] = "/nonexistent/cleanup"
+
+        response = client.post("/api/v1/move/non-duplicates")
+        self.assertEqual(response.status_code, 404)
+
+    def test_move_non_duplicates_nonexistent_target(self):
+        """Test move non-duplicates with nonexistent target directory"""
+        os.environ["TARGET_DIRECTORY"] = "/nonexistent/target"
+
+        response = client.post("/api/v1/move/non-duplicates")
+        self.assertEqual(response.status_code, 404)
+
+    def test_move_non_duplicates_metrics(self):
+        """Test that move non-duplicates records metrics"""
+        response = client.post("/api/v1/move/non-duplicates")
+        self.assertEqual(response.status_code, 200)
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have move metrics
+        self.assertIn("bronson_move_files_found_total", metrics_text)
+        self.assertIn("bronson_move_operation_duration_seconds", metrics_text)
+
+        # Check specific metric values
+        self.assertIn(
+            f'bronson_move_files_found_total{{cleanup_directory="{self.cleanup_dir}",target_directory="{self.target_dir}"}} 2.0',
+            metrics_text,
+        )
+
+    def test_move_non_duplicates_with_files(self):
+        """Test that move non-duplicates only looks at directories, not files"""
+        # Add some files to the directories
+        (self.cleanup_dir / "test_file.txt").touch()
+        (self.target_dir / "test_file.txt").touch()
+        (self.cleanup_dir / "another_file.jpg").touch()
+
+        response = client.post("/api/v1/move/non-duplicates")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Files should not be included in non-duplicates
+        self.assertNotIn("test_file.txt", data["non_duplicate_subdirectories"])
+        self.assertNotIn(
+            "another_file.jpg", data["non_duplicate_subdirectories"]
+        )
+
+        # Should still find the directory non-duplicates
+        self.assertIn("cleanup_only", data["non_duplicate_subdirectories"])
+        self.assertIn(
+            "another_cleanup_only", data["non_duplicate_subdirectories"]
+        )
+
+    def test_move_non_duplicates_error_handling(self):
+        """Test move non-duplicates error handling"""
+        # Create a file with the same name as a directory to cause a move error
+        (
+            self.target_dir / "cleanup_only"
+        ).touch()  # This will conflict with the directory move
+
+        response = client.post("/api/v1/move/non-duplicates?dry_run=false")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Should have an error
+        self.assertGreater(data["errors"], 0)
+        self.assertIn("error_details", data)
+        self.assertGreater(len(data["error_details"]), 0)
+
+        # Should still report the non-duplicates found
+        self.assertEqual(data["non_duplicates_found"], 2)
+
+        # The file should still exist in cleanup (move failed)
+        self.assertTrue((self.cleanup_dir / "cleanup_only").exists())
+        self.assertTrue(
+            (self.target_dir / "cleanup_only").exists()
+            and (self.target_dir / "cleanup_only").is_file()
+        )
+
+    def test_move_non_duplicates_preserves_file_contents(self):
+        """Test that move non-duplicates preserves file contents"""
+        # Create a file with specific content
+        test_file = self.cleanup_dir / "cleanup_only" / "test_content.txt"
+        test_file.write_text("This is test content")
+
+        response = client.post("/api/v1/move/non-duplicates?dry_run=false")
+        self.assertEqual(response.status_code, 200)
+
+        # Verify the file was moved and content preserved
+        moved_file = self.target_dir / "cleanup_only" / "test_content.txt"
+        self.assertTrue(moved_file.exists())
+        self.assertEqual(moved_file.read_text(), "This is test content")
+
+        # Verify original file no longer exists
+        self.assertFalse(test_file.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
