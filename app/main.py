@@ -198,20 +198,20 @@ comparison_operation_duration = Histogram(
 subdirectories_found_total = Counter(
     "bronson_subdirectories_found_total",
     "Total number of subdirectories found",
-    ["directory", "operation_type"],
+    ["directory", "operation_type", "dry_run"],
 )
 
 # Custom Prometheus metrics for file move operations
 move_files_found_total = Counter(
     "bronson_move_files_found_total",
     "Total number of files found for moving",
-    ["cleanup_directory", "target_directory"],
+    ["cleanup_directory", "target_directory", "dry_run"],
 )
 
 move_files_moved_total = Counter(
     "bronson_move_files_moved_total",
     "Total number of files successfully moved",
-    ["cleanup_directory", "target_directory"],
+    ["cleanup_directory", "target_directory", "dry_run"],
 )
 
 move_errors_total = Counter(
@@ -241,7 +241,7 @@ move_directories_moved = Gauge(
 move_batch_operations_total = Counter(
     "bronson_move_batch_operations_total",
     "Total number of batch operations performed",
-    ["cleanup_directory", "target_directory", "batch_size"],
+    ["cleanup_directory", "target_directory", "batch_size", "dry_run"],
 )
 
 bronson_info = Gauge("bronson_info", "Info about the server", ["version"])
@@ -366,7 +366,9 @@ def find_unwanted_files(
 
 
 def get_subdirectories(
-    directory_path: Path, operation_type: str = "general"
+    directory_path: Path,
+    operation_type: str = "general",
+    dry_run: bool = False,
 ) -> List[str]:
     """
     Get all subdirectories in a directory.
@@ -374,6 +376,7 @@ def get_subdirectories(
     Args:
         directory_path: Path to the directory to scan
         operation_type: Type of operation for metrics (e.g., "comparison", "scan", "cleanup")
+        dry_run: Boolean for Prometheus metrics
 
     Returns:
         List of subdirectory names (not full paths)
@@ -389,7 +392,9 @@ def get_subdirectories(
     # Record metric for subdirectories found (but not for comparison operations)
     if operation_type != "comparison":
         subdirectories_found_total.labels(
-            directory=str(directory_path), operation_type=operation_type
+            directory=str(directory_path),
+            operation_type=operation_type,
+            dry_run=str(dry_run).lower(),
         ).inc(len(subdirectories))
 
     return subdirectories
@@ -752,8 +757,8 @@ async def compare_directories(verbose: bool = False):
         validate_directory(target_path, target_dir, "comparison")
 
         # Get subdirectories from both directories
-        cleanup_subdirs = get_subdirectories(cleanup_path, "comparison")
-        target_subdirs = get_subdirectories(target_path, "comparison")
+        cleanup_subdirs = get_subdirectories(cleanup_path, "comparison", False)
+        target_subdirs = get_subdirectories(target_path, "comparison", False)
 
         logger.info(
             f"Directory comparison: Found {len(cleanup_subdirs)} subdirectories in cleanup, {len(target_subdirs)} in target"
@@ -846,8 +851,8 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
         validate_directory(target_path, target_dir, "comparison")
 
         # Get subdirectories from both directories (reusing existing functionality)
-        cleanup_subdirs = get_subdirectories(cleanup_path, "move")
-        target_subdirs = get_subdirectories(target_path, "move")
+        cleanup_subdirs = get_subdirectories(cleanup_path, "move", dry_run)
+        target_subdirs = get_subdirectories(target_path, "move", dry_run)
 
         logger.info(
             f"Move operation: Found {len(cleanup_subdirs)} subdirectories in cleanup, {len(target_subdirs)} in target"
@@ -856,7 +861,9 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
         # Find non-duplicates (subdirectories that exist in cleanup but not in target)
         cleanup_set = set(cleanup_subdirs)
         target_set = set(target_subdirs)
-        non_duplicates = list(cleanup_set - target_set)
+        non_duplicates = sorted(
+            list(cleanup_set - target_set)
+        )  # Sort for deterministic order
         duplicates = list(cleanup_set.intersection(target_set))
 
         logger.info(
@@ -867,7 +874,9 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
 
         # Record metrics for files found
         move_files_found_total.labels(
-            cleanup_directory=cleanup_dir, target_directory=target_dir
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            dry_run=str(dry_run).lower(),
         ).inc(len(non_duplicates))
 
         # Record gauge metrics for duplicates found and directories moved
@@ -909,6 +918,7 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
                     move_files_moved_total.labels(
                         cleanup_directory=cleanup_dir,
                         target_directory=target_dir,
+                        dry_run=str(dry_run).lower(),
                     ).inc()
                 except Exception as e:
                     error_msg = f"Failed to move {subdir_name}: {str(e)}"
@@ -942,6 +952,7 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
             cleanup_directory=cleanup_dir,
             target_directory=target_dir,
             batch_size=str(batch_size),
+            dry_run=str(dry_run).lower(),
         ).inc()
 
         # Record operation duration

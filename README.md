@@ -305,7 +305,7 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `bronson_move_operation_duration_seconds` - Time spent on file move operations (labels: operation_type, cleanup_directory, target_directory)
 - `bronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation (labels: cleanup_directory, target_directory, dry_run)
 - `bronson_move_directories_moved` - Number of directories successfully moved (labels: cleanup_directory, target_directory, dry_run)
-- `bronson_move_batch_operations_total` - Total number of batch operations performed (labels: cleanup_directory, target_directory, batch_size)
+- `bronson_move_batch_operations_total` - Total number of batch operations performed (labels: cleanup_directory, target_directory, batch_size, dry_run)
 
 The metrics endpoint is automatically exposed at `/metrics` and supports gzip compression for efficient data transfer.
 
