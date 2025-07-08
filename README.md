@@ -1,12 +1,13 @@
 # Bronson
 
-A FastAPI application with Docker containerization, Prometheus metrics, and comprehensive unit tests.
+A FastAPI application with Docker containerization, Prometheus metrics, Redis queue processing, and comprehensive unit tests.
 
 ## Features
 
 - **FastAPI Application**: Modern, fast web framework for building APIs
 - **Docker Containerization**: Easy deployment and development
 - **Prometheus Metrics**: Built-in monitoring and observability
+- **Redis Queue Processing**: Asynchronous file operations with Redis and RQ
 - **Docker Compose**: Simple containerized deployment
 - **Unit Tests**: Comprehensive test coverage with pytest
 - **Health Checks**: Built-in health monitoring endpoints
@@ -20,7 +21,7 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 
 ### Running with Docker Compose
 
-1. **Start the complete stack**:
+1. **Start the complete stack** (includes Redis and worker):
 
    ```bash
    docker-compose up -d
@@ -30,6 +31,7 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
    - FastAPI App: <http://localhost:1968>
    - API Documentation: <http://localhost:1968/docs>
    - Prometheus Metrics: <http://localhost:1968/metrics>
+   - Redis: localhost:6379
 
 3. **Stop the services**:
 
@@ -45,13 +47,30 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
    pip install -r requirements.txt
    ```
 
-2. **Run the application**:
+2. **Start Redis** (required for queue functionality):
+
+   ```bash
+   # Using Docker
+   docker run -d -p 6379:6379 redis:7-alpine
+
+   # Or install Redis locally
+   # brew install redis  # macOS
+   # sudo apt-get install redis-server  # Ubuntu
+   ```
+
+3. **Run the application**:
 
    ```bash
    uvicorn app.main:app --reload --host 0.0.0.0 --port 1968
    ```
 
-3. **Run tests**:
+4. **Run the worker** (in a separate terminal):
+
+   ```bash
+   python worker.py
+   ```
+
+5. **Run tests**:
 
    ```bash
    # Run tests locally
@@ -76,7 +95,15 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 - `POST /api/v1/items` - Create a new item
 - `GET /api/v1/items/{item_id}` - Get a specific item by ID
 - `GET /api/v1/compare/directories` - Compare subdirectories between directories
-- `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories between directories
+- `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories using Redis queue
+
+### Queue Management Endpoints
+
+- `GET /api/v1/queue/status` - Get queue status and statistics
+- `GET /api/v1/queue/operations` - List operations in the queue
+- `GET /api/v1/queue/operations/{operation_id}` - Get status of a specific operation
+- `POST /api/v1/queue/clear` - Clear all operations from the queue
+- `DELETE /api/v1/queue/operations/{operation_id}` - Cancel a specific operation
 
 ### File Cleanup Endpoints
 
@@ -261,6 +288,119 @@ curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false&bat
 - Comprehensive error reporting for failed operations
 - Uses existing directory validation and security checks
 
+### Redis Queue Processing
+
+The file move operations now use Redis queues for asynchronous processing, providing better scalability and reliability.
+
+#### Queue Configuration
+
+**Environment Variables:**
+
+- `REDIS_HOST` - Redis server hostname (default: `localhost`)
+- `REDIS_PORT` - Redis server port (default: `6379`)
+- `REDIS_DB` - Redis database number (default: `0`)
+- `REDIS_PASSWORD` - Redis password (optional)
+
+#### Queue Management Usage
+
+**Get queue status:**
+
+```bash
+curl "http://localhost:1968/api/v1/queue/status"
+```
+
+**Response format:**
+
+```json
+{
+  "queue_name": "move_operations",
+  "total_jobs": 5,
+  "pending_jobs": 3,
+  "failed_jobs": 0,
+  "started_jobs": 1,
+  "deferred_jobs": 0,
+  "finished_jobs": 1,
+  "scheduled_jobs": 0
+}
+```
+
+**List operations in queue:**
+
+```bash
+curl "http://localhost:1968/api/v1/queue/operations?limit=10&offset=0"
+```
+
+**Get specific operation status:**
+
+```bash
+curl "http://localhost:1968/api/v1/queue/operations/{operation_id}"
+```
+
+**Clear all operations from queue:**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/queue/clear"
+```
+
+**Cancel a specific operation:**
+
+```bash
+curl -X DELETE "http://localhost:1968/api/v1/queue/operations/{operation_id}"
+```
+
+#### Worker Process
+
+The worker process handles the actual file move operations from the queue:
+
+```bash
+# Start the worker
+python worker.py
+```
+
+**Worker Features:**
+
+- Processes move operations asynchronously
+- Handles job failures and retries
+- Provides detailed logging
+- Supports job cancellation
+- Maintains job history
+
+#### Updated Move Response
+
+The move endpoint now returns queue information instead of immediate results:
+
+```json
+{
+  "cleanup_directory": "/path/to/cleanup",
+  "target_directory": "/path/to/target",
+  "dry_run": false,
+  "batch_size": 1,
+  "non_duplicates_found": 2,
+  "operations_enqueued": 1,
+  "non_duplicate_subdirectories": ["cleanup_only", "another_cleanup_only"],
+  "enqueued_operations": [
+    {
+      "operation_id": "uuid-here",
+      "subdir_name": "cleanup_only",
+      "job_id": "job-uuid-here",
+      "status": "enqueued"
+    }
+  ],
+  "remaining_files": 1,
+  "queue_name": "move_operations"
+}
+```
+
+#### Queue Metrics
+
+Additional Prometheus metrics are available for queue monitoring:
+
+- `bronson_queue_operations_enqueued_total` - Total operations enqueued (labels: operation_type, dry_run)
+- `bronson_queue_operations_completed_total` - Total operations completed (labels: operation_type, status)
+- `bronson_queue_operations_failed_total` - Total operations that failed (labels: operation_type, error_type)
+- `bronson_queue_operation_duration_seconds` - Time spent on queue operations (labels: operation_type, status)
+- `bronson_queue_size` - Current number of operations in queue (labels: queue_name)
+
 ## Monitoring
 
 ### Health Check
@@ -306,6 +446,14 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `bronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation (labels: cleanup_directory, target_directory, dry_run)
 - `bronson_move_directories_moved` - Number of directories successfully moved (labels: cleanup_directory, target_directory, dry_run)
 - `bronson_move_batch_operations_total` - Total number of batch operations performed (labels: cleanup_directory, target_directory, batch_size, dry_run)
+
+#### Queue Metrics
+
+- `bronson_queue_operations_enqueued_total` - Total operations enqueued (labels: operation_type, dry_run)
+- `bronson_queue_operations_completed_total` - Total operations completed (labels: operation_type, status)
+- `bronson_queue_operations_failed_total` - Total operations that failed (labels: operation_type, error_type)
+- `bronson_queue_operation_duration_seconds` - Time spent on queue operations (labels: operation_type, status)
+- `bronson_queue_size` - Current number of operations in queue (labels: queue_name)
 
 The metrics endpoint is automatically exposed at `/metrics` and supports gzip compression for efficient data transfer.
 

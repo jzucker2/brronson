@@ -3,13 +3,18 @@ import logging.config
 import os
 import re
 import time
+import uuid
+from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
+import redis
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import Counter, Gauge, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator, metrics
+from rq import Queue
+from rq.job import Job
 
 from .version import version
 
@@ -77,6 +82,29 @@ def get_cleanup_directory():
 def get_target_directory():
     """Get the target directory from environment variable"""
     return os.getenv("TARGET_DIRECTORY", "/target")
+
+
+def get_redis_config():
+    """Get Redis configuration from environment variables"""
+    return {
+        "host": os.getenv("REDIS_HOST", "localhost"),
+        "port": int(os.getenv("REDIS_PORT", "6379")),
+        "db": int(os.getenv("REDIS_DB", "0")),
+        "password": os.getenv("REDIS_PASSWORD"),
+        "decode_responses": True,
+    }
+
+
+def get_redis_connection():
+    """Get Redis connection"""
+    config = get_redis_config()
+    return redis.Redis(**config)
+
+
+def get_move_queue():
+    """Get the move operations queue"""
+    redis_conn = get_redis_connection()
+    return Queue("move_operations", connection=redis_conn)
 
 
 # Default patterns for common unwanted files
@@ -244,6 +272,37 @@ move_batch_operations_total = Counter(
     ["cleanup_directory", "target_directory", "batch_size", "dry_run"],
 )
 
+# Custom Prometheus metrics for queue operations
+queue_operations_enqueued_total = Counter(
+    "bronson_queue_operations_enqueued_total",
+    "Total number of operations enqueued",
+    ["operation_type", "dry_run"],
+)
+
+queue_operations_completed_total = Counter(
+    "bronson_queue_operations_completed_total",
+    "Total number of operations completed",
+    ["operation_type", "status"],
+)
+
+queue_operations_failed_total = Counter(
+    "bronson_queue_operations_failed_total",
+    "Total number of operations that failed",
+    ["operation_type", "error_type"],
+)
+
+queue_operation_duration = Histogram(
+    "bronson_queue_operation_duration_seconds",
+    "Time spent on queue operations",
+    ["operation_type", "status"],
+)
+
+queue_size = Gauge(
+    "bronson_queue_size",
+    "Current number of operations in queue",
+    ["queue_name"],
+)
+
 bronson_info = Gauge("bronson_info", "Info about the server", ["version"])
 
 
@@ -370,34 +429,92 @@ def get_subdirectories(
     operation_type: str = "general",
     dry_run: bool = False,
 ) -> List[str]:
-    """
-    Get all subdirectories in a directory.
-
-    Args:
-        directory_path: Path to the directory to scan
-        operation_type: Type of operation for metrics (e.g., "comparison", "scan", "cleanup")
-        dry_run: Boolean for Prometheus metrics
-
-    Returns:
-        List of subdirectory names (not full paths)
-    """
+    """Get list of subdirectories in the given directory"""
     subdirectories = []
     try:
-        for item in directory_path.iterdir():
-            if item.is_dir():
-                subdirectories.append(item.name)
-    except Exception:
-        pass  # Return empty list if directory doesn't exist or can't be read
-
-    # Record metric for subdirectories found (but not for comparison operations)
-    if operation_type != "comparison":
+        if directory_path.exists() and directory_path.is_dir():
+            for item in directory_path.iterdir():
+                if item.is_dir():
+                    subdirectories.append(item.name)
+        else:
+            logger.warning(
+                f"Directory {directory_path} does not exist or is not a directory"
+            )
+    except Exception as e:
+        logger.error(
+            f"Error getting subdirectories from {directory_path}: {str(e)}"
+        )
         subdirectories_found_total.labels(
             directory=str(directory_path),
             operation_type=operation_type,
             dry_run=str(dry_run).lower(),
-        ).inc(len(subdirectories))
+        ).inc(0)
+
+    # Record metric for subdirectories found
+    subdirectories_found_total.labels(
+        directory=str(directory_path),
+        operation_type=operation_type,
+        dry_run=str(dry_run).lower(),
+    ).inc(len(subdirectories))
 
     return subdirectories
+
+
+def execute_move_operation(operation_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute a move operation. This function will be called by the Redis queue worker.
+
+    Args:
+        operation_data: Dictionary containing move operation details
+
+    Returns:
+        Dictionary with operation results
+    """
+    operation_id = operation_data.get("operation_id")
+    subdir_name = operation_data.get("subdir_name")
+    source_path = operation_data.get("source_path")
+    target_path = operation_data.get("target_path")
+    dry_run = operation_data.get("dry_run", True)
+
+    logger.info(f"Executing move operation {operation_id}: {subdir_name}")
+
+    result = {
+        "operation_id": operation_id,
+        "subdir_name": subdir_name,
+        "source_path": source_path,
+        "target_path": target_path,
+        "dry_run": dry_run,
+        "status": "pending",
+        "started_at": datetime.utcnow().isoformat(),
+        "completed_at": None,
+        "success": False,
+        "error": None,
+    }
+
+    try:
+        if not dry_run:
+            import shutil
+
+            shutil.move(source_path, target_path)
+            result["status"] = "completed"
+            result["success"] = True
+            logger.info(
+                f"Successfully moved {subdir_name} from {source_path} to {target_path}"
+            )
+        else:
+            result["status"] = "completed"
+            result["success"] = True
+            logger.info(
+                f"DRY RUN: Would move {subdir_name} from {source_path} to {target_path}"
+            )
+
+    except Exception as e:
+        result["status"] = "failed"
+        result["error"] = str(e)
+        logger.error(f"Failed to move {subdir_name}: {str(e)}")
+
+    result["completed_at"] = datetime.utcnow().isoformat()
+    return result
 
 
 # Create FastAPI app
@@ -828,10 +945,10 @@ async def compare_directories(verbose: bool = False):
 @app.post("/api/v1/move/non-duplicates")
 async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
     """
-    Move non-duplicate files from CLEANUP_DIRECTORY to TARGET_DIRECTORY.
+    Move non-duplicate files from CLEANUP_DIRECTORY to TARGET_DIRECTORY using Redis queue.
 
     This function identifies subdirectories that exist in the cleanup directory
-    but not in the target directory, and moves them to the target directory.
+    but not in the target directory, and enqueues them for moving to the target directory.
 
     Args:
         dry_run: If True, only show what would be moved (default: True)
@@ -879,18 +996,20 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
             dry_run=str(dry_run).lower(),
         ).inc(len(non_duplicates))
 
-        # Record gauge metrics for duplicates found and directories moved
+        # Record gauge metrics for duplicates found
         move_duplicates_found.labels(
             cleanup_directory=cleanup_dir,
             target_directory=target_dir,
             dry_run=str(dry_run).lower(),
         ).set(len(duplicates))
 
-        moved_files = []
-        errors = []
+        # Get the Redis queue
+        queue = get_move_queue()
+
+        # Enqueue move operations
+        enqueued_operations = []
         processed_count = 0
 
-        # Process non-duplicate subdirectories for moving in batches
         for subdir_name in non_duplicates:
             # Check if we've reached the batch limit
             if processed_count >= batch_size:
@@ -902,50 +1021,54 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
             source_path = cleanup_path / subdir_name
             target_path_subdir = target_path / subdir_name
 
-            if not dry_run:
-                try:
-                    logger.info(
-                        f"Starting to move directory: {subdir_name} from {source_path} to {target_path_subdir}"
-                    )
-                    # Use shutil.move for cross-device moves if needed
-                    import shutil
+            # Create operation data
+            operation_id = str(uuid.uuid4())
+            operation_data = {
+                "operation_id": operation_id,
+                "subdir_name": subdir_name,
+                "source_path": str(source_path),
+                "target_path": str(target_path_subdir),
+                "dry_run": dry_run,
+            }
 
-                    shutil.move(str(source_path), str(target_path_subdir))
-                    moved_files.append(subdir_name)
-                    logger.info(
-                        f"Successfully finished moving directory: {subdir_name}"
-                    )
-                    move_files_moved_total.labels(
-                        cleanup_directory=cleanup_dir,
-                        target_directory=target_dir,
-                        dry_run=str(dry_run).lower(),
-                    ).inc()
-                except Exception as e:
-                    error_msg = f"Failed to move {subdir_name}: {str(e)}"
-                    logger.error(
-                        f"Failed to move directory {subdir_name}: {str(e)}"
-                    )
-                    errors.append(error_msg)
-                    move_errors_total.labels(
-                        cleanup_directory=cleanup_dir,
-                        target_directory=target_dir,
-                        error_type="file_move_error",
-                    ).inc()
-            else:
-                # In dry run mode, just add to moved_files for reporting
-                logger.info(
-                    f"DRY RUN: Would move directory: {subdir_name} from {source_path} to {target_path_subdir}"
-                )
-                moved_files.append(subdir_name)
+            # Enqueue the operation
+            job = queue.enqueue(
+                execute_move_operation,
+                operation_data,
+                job_id=operation_id,
+                job_timeout="1h",
+                result_ttl=86400,  # Keep results for 24 hours
+            )
 
+            enqueued_operations.append(
+                {
+                    "operation_id": operation_id,
+                    "subdir_name": subdir_name,
+                    "job_id": job.id,
+                    "status": "enqueued",
+                }
+            )
+
+            logger.info(
+                f"Enqueued move operation {operation_id} for {subdir_name}"
+            )
             processed_count += 1
 
-        # Record gauge metric for directories moved
+        # Record queue metrics
+        queue_operations_enqueued_total.labels(
+            operation_type="move",
+            dry_run=str(dry_run).lower(),
+        ).inc(len(enqueued_operations))
+
+        # Record gauge metrics for directories to be moved (enqueued operations)
         move_directories_moved.labels(
             cleanup_directory=cleanup_dir,
             target_directory=target_dir,
             dry_run=str(dry_run).lower(),
-        ).set(len(moved_files))
+        ).set(len(enqueued_operations))
+
+        # Update queue size metric
+        queue_size.labels(queue_name="move_operations").set(len(queue))
 
         # Record batch operation metric
         move_batch_operations_total.labels(
@@ -969,12 +1092,11 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
             "dry_run": dry_run,
             "batch_size": batch_size,
             "non_duplicates_found": len(non_duplicates),
-            "files_moved": len(moved_files),
-            "errors": len(errors),
+            "operations_enqueued": len(enqueued_operations),
             "non_duplicate_subdirectories": non_duplicates,
-            "moved_subdirectories": moved_files,
-            "error_details": errors,
+            "enqueued_operations": enqueued_operations,
             "remaining_files": len(non_duplicates) - processed_count,
+            "queue_name": "move_operations",
         }
 
     except HTTPException:
@@ -989,6 +1111,153 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
         raise HTTPException(
             status_code=500,
             detail=f"Error during file move operation: {str(e)}",
+        )
+
+
+@app.get("/api/v1/queue/status")
+async def get_queue_status():
+    """Get the current status of the move operations queue"""
+    try:
+        queue = get_move_queue()
+
+        # Get queue statistics
+        queue_stats = {
+            "queue_name": "move_operations",
+            "total_jobs": len(queue),
+            "pending_jobs": len(queue.jobs),
+            "failed_jobs": len(queue.failed_job_registry),
+            "started_jobs": len(queue.started_job_registry),
+            "deferred_jobs": len(queue.deferred_job_registry),
+            "finished_jobs": len(queue.finished_job_registry),
+            "scheduled_jobs": len(queue.scheduled_job_registry),
+        }
+
+        return queue_stats
+
+    except Exception as e:
+        logger.error(f"Error getting queue status: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting queue status: {str(e)}",
+        )
+
+
+@app.get("/api/v1/queue/operations")
+async def get_queue_operations(limit: int = 50, offset: int = 0):
+    """Get a list of operations in the queue"""
+    try:
+        queue = get_move_queue()
+
+        # Get jobs from the queue
+        jobs = queue.jobs[offset : offset + limit]
+
+        operations = []
+        for job in jobs:
+            operation = {
+                "job_id": job.id,
+                "status": job.get_status(),
+                "created_at": (
+                    job.created_at.isoformat() if job.created_at else None
+                ),
+                "started_at": (
+                    job.started_at.isoformat() if job.started_at else None
+                ),
+                "ended_at": job.ended_at.isoformat() if job.ended_at else None,
+                "result": job.result,
+                "exc_info": job.exc_info,
+            }
+            operations.append(operation)
+
+        return {
+            "operations": operations,
+            "total": len(queue),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting queue operations: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting queue operations: {str(e)}",
+        )
+
+
+@app.get("/api/v1/queue/operations/{operation_id}")
+async def get_operation_status(operation_id: str):
+    """Get the status of a specific operation"""
+    try:
+        queue = get_move_queue()
+        job = Job.fetch(operation_id, connection=queue.connection)
+
+        operation = {
+            "operation_id": operation_id,
+            "job_id": job.id,
+            "status": job.get_status(),
+            "created_at": (
+                job.created_at.isoformat() if job.created_at else None
+            ),
+            "started_at": (
+                job.started_at.isoformat() if job.started_at else None
+            ),
+            "ended_at": job.ended_at.isoformat() if job.ended_at else None,
+            "result": job.result,
+            "exc_info": job.exc_info,
+            "meta": job.meta,
+        }
+
+        return operation
+
+    except Exception as e:
+        logger.error(f"Error getting operation status: {str(e)}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Operation not found or error: {str(e)}",
+        )
+
+
+@app.post("/api/v1/queue/clear")
+async def clear_queue():
+    """Clear all jobs from the queue"""
+    try:
+        queue = get_move_queue()
+        queue.empty()
+
+        # Update queue size metric
+        queue_size.labels(queue_name="move_operations").set(0)
+
+        return {"message": "Queue cleared successfully"}
+
+    except Exception as e:
+        logger.error(f"Error clearing queue: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error clearing queue: {str(e)}",
+        )
+
+
+@app.delete("/api/v1/queue/operations/{operation_id}")
+async def cancel_operation(operation_id: str):
+    """Cancel a specific operation"""
+    try:
+        queue = get_move_queue()
+        job = Job.fetch(operation_id, connection=queue.connection)
+
+        if job.get_status() in ["queued", "started"]:
+            job.cancel()
+            return {
+                "message": f"Operation {operation_id} cancelled successfully"
+            }
+        else:
+            return {
+                "message": f"Operation {operation_id} cannot be cancelled (status: {job.get_status()})"
+            }
+
+    except Exception as e:
+        logger.error(f"Error cancelling operation: {str(e)}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Operation not found or error: {str(e)}",
         )
 
 
