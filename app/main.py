@@ -1060,6 +1060,13 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
             dry_run=str(dry_run).lower(),
         ).inc(len(enqueued_operations))
 
+        # Record gauge metrics for directories to be moved (enqueued operations)
+        move_directories_moved.labels(
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            dry_run=str(dry_run).lower(),
+        ).set(len(enqueued_operations))
+
         # Update queue size metric
         queue_size.labels(queue_name="move_operations").set(len(queue))
 
