@@ -1,3 +1,5 @@
+import logging
+import logging.config
 import os
 import re
 import time
@@ -10,6 +12,61 @@ from prometheus_client import Counter, Gauge, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator, metrics
 
 from .version import version
+
+
+# Configure logging
+def setup_logging():
+    """Setup configurable logging for the application"""
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_file = os.getenv("LOG_FILE", "bronson.log")
+    log_format = os.getenv(
+        "LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+
+    # Create logs directory if it doesn't exist
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+
+    log_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": log_format,
+                "datefmt": "%Y-%m-%d %H:%M:%S",
+            },
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "level": log_level,
+                "formatter": "default",
+                "stream": "ext://sys.stdout",
+            },
+            "file": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": log_level,
+                "formatter": "default",
+                "filename": str(log_dir / log_file),
+                "maxBytes": 10485760,  # 10MB
+                "backupCount": 5,
+            },
+        },
+        "loggers": {
+            "": {  # Root logger
+                "level": log_level,
+                "handlers": ["console", "file"],
+                "propagate": False,
+            },
+        },
+    }
+
+    logging.config.dictConfig(log_config)
+
+
+# Setup logging
+setup_logging()
+logger = logging.getLogger(__name__)
 
 
 def get_cleanup_directory():
@@ -48,19 +105,19 @@ DEFAULT_UNWANTED_PATTERNS = [
 cleanup_files_found_total = Counter(
     "bronson_cleanup_files_found_total",
     "Total number of unwanted files found during cleanup",
-    ["directory", "pattern"],
+    ["directory", "pattern", "dry_run"],
 )
 
 cleanup_current_files = Gauge(
     "bronson_cleanup_current_files",
     "Current number of unwanted files in directory",
-    ["directory", "pattern"],
+    ["directory", "pattern", "dry_run"],
 )
 
 cleanup_files_removed_total = Counter(
     "bronson_cleanup_files_removed_total",
     "Total number of files successfully removed during cleanup",
-    ["directory", "pattern"],
+    ["directory", "pattern", "dry_run"],
 )
 
 cleanup_errors_total = Counter(
@@ -119,6 +176,12 @@ comparison_duplicates_found_total = Gauge(
     ["cleanup_directory", "target_directory"],
 )
 
+comparison_non_duplicates_found_total = Gauge(
+    "bronson_comparison_non_duplicates_found_total",
+    "Current number of non-duplicate subdirectories in cleanup directory",
+    ["cleanup_directory", "target_directory"],
+)
+
 comparison_errors_total = Counter(
     "bronson_comparison_errors_total",
     "Total number of errors during directory comparison",
@@ -135,7 +198,50 @@ comparison_operation_duration = Histogram(
 subdirectories_found_total = Counter(
     "bronson_subdirectories_found_total",
     "Total number of subdirectories found",
-    ["directory", "operation_type"],
+    ["directory", "operation_type", "dry_run"],
+)
+
+# Custom Prometheus metrics for file move operations
+move_files_found_total = Counter(
+    "bronson_move_files_found_total",
+    "Total number of files found for moving",
+    ["cleanup_directory", "target_directory", "dry_run"],
+)
+
+move_files_moved_total = Counter(
+    "bronson_move_files_moved_total",
+    "Total number of files successfully moved",
+    ["cleanup_directory", "target_directory", "dry_run"],
+)
+
+move_errors_total = Counter(
+    "bronson_move_errors_total",
+    "Total number of errors during file move operations",
+    ["cleanup_directory", "target_directory", "error_type"],
+)
+
+move_operation_duration = Histogram(
+    "bronson_move_operation_duration_seconds",
+    "Time spent on file move operations",
+    ["operation_type", "cleanup_directory", "target_directory"],
+)
+
+move_duplicates_found = Gauge(
+    "bronson_move_duplicates_found",
+    "Number of duplicate subdirectories found during move operation",
+    ["cleanup_directory", "target_directory", "dry_run"],
+)
+
+move_directories_moved = Gauge(
+    "bronson_move_directories_moved",
+    "Number of directories successfully moved",
+    ["cleanup_directory", "target_directory", "dry_run"],
+)
+
+move_batch_operations_total = Counter(
+    "bronson_move_batch_operations_total",
+    "Total number of batch operations performed",
+    ["cleanup_directory", "target_directory", "batch_size", "dry_run"],
 )
 
 bronson_info = Gauge("bronson_info", "Info about the server", ["version"])
@@ -260,7 +366,9 @@ def find_unwanted_files(
 
 
 def get_subdirectories(
-    directory_path: Path, operation_type: str = "general"
+    directory_path: Path,
+    operation_type: str = "general",
+    dry_run: bool = False,
 ) -> List[str]:
     """
     Get all subdirectories in a directory.
@@ -268,6 +376,7 @@ def get_subdirectories(
     Args:
         directory_path: Path to the directory to scan
         operation_type: Type of operation for metrics (e.g., "comparison", "scan", "cleanup")
+        dry_run: Boolean for Prometheus metrics
 
     Returns:
         List of subdirectory names (not full paths)
@@ -283,13 +392,21 @@ def get_subdirectories(
     # Record metric for subdirectories found (but not for comparison operations)
     if operation_type != "comparison":
         subdirectories_found_total.labels(
-            directory=str(directory_path), operation_type=operation_type
+            directory=str(directory_path),
+            operation_type=operation_type,
+            dry_run=str(dry_run).lower(),
         ).inc(len(subdirectories))
 
     return subdirectories
 
 
+# Create FastAPI app
 app = FastAPI(title="Bronson", version=version)
+
+# Log application startup
+logger.info(f"Starting Bronson application version {version}")
+logger.info(f"Cleanup directory: {get_cleanup_directory()}")
+logger.info(f"Target directory: {get_target_directory()}")
 
 # Add CORS middleware
 app.add_middleware(
@@ -397,6 +514,14 @@ async def cleanup_unwanted_files(
             directory_path, patterns, "cleanup"
         )
 
+        logger.info(
+            f"Cleanup scan completed: Found {len(found_files)} unwanted files in {directory_path}"
+        )
+        if found_files:
+            logger.info(
+                f"Files found: {', '.join([Path(f).name for f in found_files[:10]])}{'...' if len(found_files) > 10 else ''}"
+            )
+
         removed_files = []
         errors = []
 
@@ -407,20 +532,35 @@ async def cleanup_unwanted_files(
 
             if not dry_run:
                 try:
+                    logger.info(
+                        f"Starting to remove file: {file_path.name} from {file_path}"
+                    )
                     file_path.unlink()
                     removed_files.append(file_path_str)
+                    logger.info(
+                        f"Successfully finished removing file: {file_path.name}"
+                    )
                     cleanup_files_removed_total.labels(
-                        directory=cleanup_dir, pattern=pattern
+                        directory=cleanup_dir,
+                        pattern=pattern,
+                        dry_run=str(dry_run).lower(),
                     ).inc()
                     # Note: Current files gauge will be updated after all removals
                 except Exception as e:
                     error_msg = (
                         f"Failed to remove {file_path}: {str(e)}"  # noqa: E501
                     )
+                    logger.error(
+                        f"Failed to remove file {file_path.name}: {str(e)}"
+                    )
                     errors.append(error_msg)
                     cleanup_errors_total.labels(
                         directory=cleanup_dir, error_type="file_removal_error"
                     ).inc()
+            else:
+                logger.info(
+                    f"DRY RUN: Would remove file: {file_path.name} from {file_path}"
+                )
 
         # Record metrics for found files or zero out if none found
         if pattern_matches:
@@ -433,21 +573,29 @@ async def cleanup_unwanted_files(
             for pattern in patterns:
                 count = pattern_counts.get(pattern, 0)
                 cleanup_files_found_total.labels(
-                    directory=cleanup_dir, pattern=pattern
+                    directory=cleanup_dir,
+                    pattern=pattern,
+                    dry_run=str(dry_run).lower(),
                 ).inc(count)
                 # Set current files gauge
                 cleanup_current_files.labels(
-                    directory=cleanup_dir, pattern=pattern
+                    directory=cleanup_dir,
+                    pattern=pattern,
+                    dry_run=str(dry_run).lower(),
                 ).set(count)
         else:
             # Zero out metrics for each pattern when no files are found
             for pattern in patterns:
                 cleanup_files_found_total.labels(
-                    directory=cleanup_dir, pattern=pattern
+                    directory=cleanup_dir,
+                    pattern=pattern,
+                    dry_run=str(dry_run).lower(),
                 ).inc(0)
                 # Set current files gauge to 0
                 cleanup_current_files.labels(
-                    directory=cleanup_dir, pattern=pattern
+                    directory=cleanup_dir,
+                    pattern=pattern,
+                    dry_run=str(dry_run).lower(),
                 ).set(0)
 
         # Update current files gauge after removal
@@ -460,7 +608,9 @@ async def cleanup_unwanted_files(
 
             for pattern in removed_patterns:
                 cleanup_current_files.labels(
-                    directory=cleanup_dir, pattern=pattern
+                    directory=cleanup_dir,
+                    pattern=pattern,
+                    dry_run=str(dry_run).lower(),
                 ).set(0)
 
         # Record operation duration
@@ -520,6 +670,14 @@ async def scan_for_unwanted_files(patterns: List[str] = None):
         found_files, file_sizes, pattern_matches = find_unwanted_files(
             directory_path, patterns, "scan"
         )
+
+        logger.info(
+            f"Scan completed: Found {len(found_files)} unwanted files in {directory_path}"
+        )
+        if found_files:
+            logger.info(
+                f"Files found: {', '.join([Path(f).name for f in found_files[:10]])}{'...' if len(found_files) > 10 else ''}"
+            )
 
         total_size = sum(file_sizes.values())
 
@@ -599,18 +757,34 @@ async def compare_directories(verbose: bool = False):
         validate_directory(target_path, target_dir, "comparison")
 
         # Get subdirectories from both directories
-        cleanup_subdirs = get_subdirectories(cleanup_path, "comparison")
-        target_subdirs = get_subdirectories(target_path, "comparison")
+        cleanup_subdirs = get_subdirectories(cleanup_path, "comparison", False)
+        target_subdirs = get_subdirectories(target_path, "comparison", False)
+
+        logger.info(
+            f"Directory comparison: Found {len(cleanup_subdirs)} subdirectories in cleanup, {len(target_subdirs)} in target"
+        )
 
         # Find duplicates (subdirectories that exist in both)
         cleanup_set = set(cleanup_subdirs)
         target_set = set(target_subdirs)
         duplicates = list(cleanup_set.intersection(target_set))
+        non_duplicates = list(cleanup_set - target_set)
 
-        # Record metrics - only count duplicates, not all subdirectories
+        logger.info(
+            f"Comparison results: {len(duplicates)} duplicates, {len(non_duplicates)} non-duplicates"
+        )
+        if non_duplicates:
+            logger.info(
+                f"Non-duplicate directories: {', '.join(non_duplicates)}"
+            )
+
+        # Record metrics for duplicates and non-duplicates
         comparison_duplicates_found_total.labels(
             cleanup_directory=cleanup_dir, target_directory=target_dir
         ).set(len(duplicates))
+        comparison_non_duplicates_found_total.labels(
+            cleanup_directory=cleanup_dir, target_directory=target_dir
+        ).set(len(non_duplicates))
 
         # Record operation duration
         operation_duration = time.time() - start_time
@@ -625,6 +799,7 @@ async def compare_directories(verbose: bool = False):
             "target_directory": str(target_path),
             "duplicates": duplicates,
             "duplicate_count": len(duplicates),
+            "non_duplicate_count": len(non_duplicates),
             "total_cleanup_subdirectories": len(cleanup_subdirs),
             "total_target_subdirectories": len(target_subdirs),
         }
@@ -650,7 +825,175 @@ async def compare_directories(verbose: bool = False):
         )
 
 
+@app.post("/api/v1/move/non-duplicates")
+async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
+    """
+    Move non-duplicate files from CLEANUP_DIRECTORY to TARGET_DIRECTORY.
+
+    This function identifies subdirectories that exist in the cleanup directory
+    but not in the target directory, and moves them to the target directory.
+
+    Args:
+        dry_run: If True, only show what would be moved (default: True)
+        batch_size: Number of files to move per request (default: 1)
+    """
+    start_time = time.time()
+
+    cleanup_dir = get_cleanup_directory()
+    target_dir = get_target_directory()
+
+    try:
+        cleanup_path = Path(cleanup_dir).resolve()
+        target_path = Path(target_dir).resolve()
+
+        # Validate both directories
+        validate_directory(cleanup_path, cleanup_dir, "comparison")
+        validate_directory(target_path, target_dir, "comparison")
+
+        # Get subdirectories from both directories (reusing existing functionality)
+        cleanup_subdirs = get_subdirectories(cleanup_path, "move", dry_run)
+        target_subdirs = get_subdirectories(target_path, "move", dry_run)
+
+        logger.info(
+            f"Move operation: Found {len(cleanup_subdirs)} subdirectories in cleanup, {len(target_subdirs)} in target"
+        )
+
+        # Find non-duplicates (subdirectories that exist in cleanup but not in target)
+        cleanup_set = set(cleanup_subdirs)
+        target_set = set(target_subdirs)
+        non_duplicates = sorted(
+            list(cleanup_set - target_set)
+        )  # Sort for deterministic order
+        duplicates = list(cleanup_set.intersection(target_set))
+
+        logger.info(
+            f"Move analysis: {len(duplicates)} duplicates, {len(non_duplicates)} non-duplicates to move"
+        )
+        if non_duplicates:
+            logger.info(f"Directories to move: {', '.join(non_duplicates)}")
+
+        # Record metrics for files found
+        move_files_found_total.labels(
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            dry_run=str(dry_run).lower(),
+        ).inc(len(non_duplicates))
+
+        # Record gauge metrics for duplicates found and directories moved
+        move_duplicates_found.labels(
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            dry_run=str(dry_run).lower(),
+        ).set(len(duplicates))
+
+        moved_files = []
+        errors = []
+        processed_count = 0
+
+        # Process non-duplicate subdirectories for moving in batches
+        for subdir_name in non_duplicates:
+            # Check if we've reached the batch limit
+            if processed_count >= batch_size:
+                logger.info(
+                    f"Batch limit reached ({batch_size}), stopping processing. {len(non_duplicates) - processed_count} files remaining."
+                )
+                break
+
+            source_path = cleanup_path / subdir_name
+            target_path_subdir = target_path / subdir_name
+
+            if not dry_run:
+                try:
+                    logger.info(
+                        f"Starting to move directory: {subdir_name} from {source_path} to {target_path_subdir}"
+                    )
+                    # Use shutil.move for cross-device moves if needed
+                    import shutil
+
+                    shutil.move(str(source_path), str(target_path_subdir))
+                    moved_files.append(subdir_name)
+                    logger.info(
+                        f"Successfully finished moving directory: {subdir_name}"
+                    )
+                    move_files_moved_total.labels(
+                        cleanup_directory=cleanup_dir,
+                        target_directory=target_dir,
+                        dry_run=str(dry_run).lower(),
+                    ).inc()
+                except Exception as e:
+                    error_msg = f"Failed to move {subdir_name}: {str(e)}"
+                    logger.error(
+                        f"Failed to move directory {subdir_name}: {str(e)}"
+                    )
+                    errors.append(error_msg)
+                    move_errors_total.labels(
+                        cleanup_directory=cleanup_dir,
+                        target_directory=target_dir,
+                        error_type="file_move_error",
+                    ).inc()
+            else:
+                # In dry run mode, just add to moved_files for reporting
+                logger.info(
+                    f"DRY RUN: Would move directory: {subdir_name} from {source_path} to {target_path_subdir}"
+                )
+                moved_files.append(subdir_name)
+
+            processed_count += 1
+
+        # Record gauge metric for directories moved
+        move_directories_moved.labels(
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            dry_run=str(dry_run).lower(),
+        ).set(len(moved_files))
+
+        # Record batch operation metric
+        move_batch_operations_total.labels(
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            batch_size=str(batch_size),
+            dry_run=str(dry_run).lower(),
+        ).inc()
+
+        # Record operation duration
+        operation_duration = time.time() - start_time
+        move_operation_duration.labels(
+            operation_type="move",
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+        ).observe(operation_duration)
+
+        return {
+            "cleanup_directory": str(cleanup_path),
+            "target_directory": str(target_path),
+            "dry_run": dry_run,
+            "batch_size": batch_size,
+            "non_duplicates_found": len(non_duplicates),
+            "files_moved": len(moved_files),
+            "errors": len(errors),
+            "non_duplicate_subdirectories": non_duplicates,
+            "moved_subdirectories": moved_files,
+            "error_details": errors,
+            "remaining_files": len(non_duplicates) - processed_count,
+        }
+
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 404 for missing directories) as-is
+        raise
+    except Exception as e:
+        move_errors_total.labels(
+            cleanup_directory=cleanup_dir,
+            target_directory=target_dir,
+            error_type="operation_error",
+        ).inc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error during file move operation: {str(e)}",
+        )
+
+
 if __name__ == "__main__":
     import uvicorn
 
+    logger.info("Starting Bronson server on 0.0.0.0:1968")
     uvicorn.run(app, host="0.0.0.0", port=1968)

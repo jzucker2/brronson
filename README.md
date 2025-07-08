@@ -76,6 +76,7 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
 - `POST /api/v1/items` - Create a new item
 - `GET /api/v1/items/{item_id}` - Get a specific item by ID
 - `GET /api/v1/compare/directories` - Compare subdirectories between directories
+- `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories between directories
 
 ### File Cleanup Endpoints
 
@@ -160,6 +161,7 @@ curl "http://localhost:1968/api/v1/compare/directories?verbose=true"
   "target_directory": "/path/to/target",
   "duplicates": ["dir2"],
   "duplicate_count": 1,
+  "non_duplicate_count": 2,
   "total_cleanup_subdirectories": 3,
   "total_target_subdirectories": 3
 }
@@ -175,6 +177,7 @@ curl "http://localhost:1968/api/v1/compare/directories?verbose=true"
   "target_subdirectories": ["dir2", "dir4", "dir5"],
   "duplicates": ["dir2"],
   "duplicate_count": 1,
+  "non_duplicate_count": 2,
   "total_cleanup_subdirectories": 3,
   "total_target_subdirectories": 3
 }
@@ -188,6 +191,75 @@ curl "http://localhost:1968/api/v1/compare/directories?verbose=true"
 - Provides counts for monitoring and analysis
 - Safe operation - read-only, no modifications
 - Detailed response with comprehensive directory information
+
+### File Move Endpoints
+
+- `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories from CLEANUP_DIRECTORY to TARGET_DIRECTORY
+
+#### File Move Usage
+
+The file move endpoint helps move non-duplicate subdirectories from the cleanup directory to the target directory, reusing the existing directory comparison logic.
+
+**Configuration:**
+
+- `CLEANUP_DIRECTORY` - Source directory containing subdirectories to move (default: `/tmp`)
+- `TARGET_DIRECTORY` - Destination directory for non-duplicate subdirectories (default: `/tmp`)
+
+**Move non-duplicate directories (dry run - default):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/move/non-duplicates"
+```
+
+**Move non-duplicate directories (actual move):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false"
+```
+
+**Move non-duplicate directories with custom batch size:**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false&batch_size=5"
+```
+
+**Response format:**
+
+```json
+{
+  "cleanup_directory": "/path/to/cleanup",
+  "target_directory": "/path/to/target",
+  "dry_run": true,
+  "batch_size": 1,
+  "non_duplicates_found": 2,
+  "files_moved": 1,
+  "errors": 0,
+  "non_duplicate_subdirectories": ["cleanup_only", "another_cleanup_only"],
+  "moved_subdirectories": ["cleanup_only"],
+  "error_details": [],
+  "remaining_files": 1
+}
+```
+
+**Features:**
+
+- **Safe by Default**: Default `dry_run=true` prevents accidental moves
+- **Batch Processing**: Default `batch_size=1` processes one file at a time for controlled operations
+- **Duplicate Detection**: Only moves subdirectories that don't exist in target directory
+- **Error Handling**: Comprehensive error reporting for failed moves
+- **File Preservation**: Preserves all file contents during moves
+- **Cross-Device Support**: Uses `shutil.move()` for cross-device compatibility
+- **Detailed Reporting**: Provides complete information about what was moved
+- **Progress Tracking**: `remaining_files` field shows how many files still need to be moved
+- **Prometheus Metrics**: Records move operations and duplicate counts
+
+**Safety Features:**
+
+- Default `dry_run=true` prevents accidental moves
+- Only moves subdirectories (ignores individual files)
+- Preserves existing files in target directory
+- Comprehensive error reporting for failed operations
+- Uses existing directory validation and security checks
 
 ## Monitoring
 
@@ -203,11 +275,37 @@ The application provides a simple health check endpoint at `/health` that includ
 
 The application uses [prometheus-fastapi-instrumentator](https://github.com/trallnag/prometheus-fastapi-instrumentator) to automatically collect and expose the following Prometheus metrics:
 
+#### HTTP Metrics (Automatic)
+
 - `requests_total` - Total HTTP requests with method, handler, and status labels
 - `request_duration_seconds` - HTTP request latency with method and handler labels
 - `request_size_bytes` - Size of incoming requests
 - `response_size_bytes` - Size of outgoing responses
 - `http_requests_inprogress` - Number of requests currently being processed
+
+#### File Cleanup Metrics
+
+- `bronson_cleanup_files_found_total` - Total unwanted files found during cleanup (labels: directory, pattern, dry_run)
+- `bronson_cleanup_current_files` - Current number of unwanted files in directory (labels: directory, pattern, dry_run)
+- `bronson_cleanup_files_removed_total` - Total files successfully removed during cleanup (labels: directory, pattern, dry_run)
+- `bronson_cleanup_errors_total` - Total errors during file cleanup operations
+- `bronson_cleanup_operation_duration_seconds` - Time spent on cleanup operations
+
+#### Directory Comparison Metrics
+
+- `bronson_comparison_duplicates_found_total` - Current number of duplicate subdirectories found between directories (labels: cleanup_directory, target_directory)
+- `bronson_comparison_non_duplicates_found_total` - Current number of non-duplicate subdirectories in cleanup directory (labels: cleanup_directory, target_directory)
+- `bronson_comparison_operation_duration_seconds` - Time spent on directory comparison operations (labels: operation_type, cleanup_directory, target_directory)
+
+#### File Move Metrics
+
+- `bronson_move_files_found_total` - Total files found for moving (labels: cleanup_directory, target_directory)
+- `bronson_move_files_moved_total` - Total files successfully moved (labels: cleanup_directory, target_directory)
+- `bronson_move_errors_total` - Total errors during file move operations (labels: cleanup_directory, target_directory, error_type)
+- `bronson_move_operation_duration_seconds` - Time spent on file move operations (labels: operation_type, cleanup_directory, target_directory)
+- `bronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation (labels: cleanup_directory, target_directory, dry_run)
+- `bronson_move_directories_moved` - Number of directories successfully moved (labels: cleanup_directory, target_directory, dry_run)
+- `bronson_move_batch_operations_total` - Total number of batch operations performed (labels: cleanup_directory, target_directory, batch_size, dry_run)
 
 The metrics endpoint is automatically exposed at `/metrics` and supports gzip compression for efficient data transfer.
 
@@ -362,3 +460,35 @@ docker-compose up app
 ## License
 
 This project is licensed under the MIT License.
+
+## Configuration
+
+The application can be configured using environment variables:
+
+- `CLEANUP_DIRECTORY`: Directory to scan for unwanted files (default: `/data`)
+- `TARGET_DIRECTORY`: Directory to move non-duplicate files to (default: `/target`)
+- `ENABLE_METRICS`: Enable Prometheus metrics (default: `true`)
+- `PROMETHEUS_MULTIPROC_DIR`: Directory for Prometheus multiprocess mode (default: `/tmp`)
+
+### Logging Configuration
+
+The application includes a configurable logging framework with the following environment variables:
+
+- `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) (default: `INFO`)
+- `LOG_FILE`: Name of the log file (default: `bronson.log`)
+- `LOG_FORMAT`: Log message format (default: `%(asctime)s - %(name)s - %(levelname)s - %(message)s`)
+
+Logs are written to both console and a rotating file in the `logs/` directory. The log file is automatically rotated when it reaches 10MB and keeps up to 5 backup files.
+
+### Example Log Output
+
+```
+2024-01-15 10:30:15 - app.main - INFO - Starting Bronson application version 1.0.0
+2024-01-15 10:30:15 - app.main - INFO - Cleanup directory: /data
+2024-01-15 10:30:15 - app.main - INFO - Target directory: /target
+2024-01-15 10:30:20 - app.main - INFO - Move operation: Found 3 subdirectories in cleanup, 1 in target
+2024-01-15 10:30:20 - app.main - INFO - Move analysis: 1 duplicates, 2 non-duplicates to move
+2024-01-15 10:30:20 - app.main - INFO - Directories to move: cleanup_only, another_cleanup_only
+2024-01-15 10:30:20 - app.main - INFO - Starting to move directory: cleanup_only from /data/cleanup_only to /target/cleanup_only
+2024-01-15 10:30:20 - app.main - INFO - Successfully finished moving directory: cleanup_only
+```
