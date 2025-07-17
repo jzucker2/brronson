@@ -1,6 +1,6 @@
 services:
-  bronson:
-    container_name: bronson
+  brronson:
+    container_name: brronson
     build:
       context: .
       dockerfile: Dockerfile
@@ -12,7 +12,7 @@ services:
       - CLEANUP_DIRECTORY=/data
       - TARGET_DIRECTORY=/target
       - LOG_LEVEL=INFO
-      - LOG_FILE=bronson.log
+      - LOG_FILE=brronson.log
       - LOG_FORMAT=%(asctime)s - %(name)s - %(levelname)s - %(message)s
     restart: unless-stopped
     extra_hosts:

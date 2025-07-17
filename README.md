@@ -1,6 +1,6 @@
-# Bronson
+# Brronson
 
-A FastAPI application with Docker containerization, Prometheus metrics, and comprehensive unit tests.
+A simple self hosted application for helping with media management for the -arr stack.
 
 ## Features
 
@@ -58,8 +58,8 @@ A FastAPI application with Docker containerization, Prometheus metrics, and comp
    pytest
 
    # Or run tests in Docker
-   docker build -t bronson-api .
-   docker run --rm bronson-api pytest
+   docker build -t brronson-api .
+   docker run --rm brronson-api pytest
    ```
 
 ## API Endpoints
@@ -285,27 +285,27 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 
 #### File Cleanup Metrics
 
-- `bronson_cleanup_files_found_total` - Total unwanted files found during cleanup (labels: directory, pattern, dry_run)
-- `bronson_cleanup_current_files` - Current number of unwanted files in directory (labels: directory, pattern, dry_run)
-- `bronson_cleanup_files_removed_total` - Total files successfully removed during cleanup (labels: directory, pattern, dry_run)
-- `bronson_cleanup_errors_total` - Total errors during file cleanup operations
-- `bronson_cleanup_operation_duration_seconds` - Time spent on cleanup operations
+- `brronson_cleanup_files_found_total` - Total unwanted files found during cleanup (labels: directory, pattern, dry_run)
+- `brronson_cleanup_current_files` - Current number of unwanted files in directory (labels: directory, pattern, dry_run)
+- `brronson_cleanup_files_removed_total` - Total files successfully removed during cleanup (labels: directory, pattern, dry_run)
+- `brronson_cleanup_errors_total` - Total errors during file cleanup operations
+- `brronson_cleanup_operation_duration_seconds` - Time spent on cleanup operations
 
 #### Directory Comparison Metrics
 
-- `bronson_comparison_duplicates_found_total` - Current number of duplicate subdirectories found between directories (labels: cleanup_directory, target_directory)
-- `bronson_comparison_non_duplicates_found_total` - Current number of non-duplicate subdirectories in cleanup directory (labels: cleanup_directory, target_directory)
-- `bronson_comparison_operation_duration_seconds` - Time spent on directory comparison operations (labels: operation_type, cleanup_directory, target_directory)
+- `brronson_comparison_duplicates_found_total` - Current number of duplicate subdirectories found between directories (labels: cleanup_directory, target_directory)
+- `brronson_comparison_non_duplicates_found_total` - Current number of non-duplicate subdirectories in cleanup directory (labels: cleanup_directory, target_directory)
+- `brronson_comparison_operation_duration_seconds` - Time spent on directory comparison operations (labels: operation_type, cleanup_directory, target_directory)
 
 #### File Move Metrics
 
-- `bronson_move_files_found_total` - Total files found for moving (labels: cleanup_directory, target_directory)
-- `bronson_move_files_moved_total` - Total files successfully moved (labels: cleanup_directory, target_directory)
-- `bronson_move_errors_total` - Total errors during file move operations (labels: cleanup_directory, target_directory, error_type)
-- `bronson_move_operation_duration_seconds` - Time spent on file move operations (labels: operation_type, cleanup_directory, target_directory)
-- `bronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation (labels: cleanup_directory, target_directory, dry_run)
-- `bronson_move_directories_moved` - Number of directories successfully moved (labels: cleanup_directory, target_directory, dry_run)
-- `bronson_move_batch_operations_total` - Total number of batch operations performed (labels: cleanup_directory, target_directory, batch_size, dry_run)
+- `brronson_move_files_found_total` - Total files found for moving (labels: cleanup_directory, target_directory)
+- `brronson_move_files_moved_total` - Total files successfully moved (labels: cleanup_directory, target_directory)
+- `brronson_move_errors_total` - Total errors during file move operations (labels: cleanup_directory, target_directory, error_type)
+- `brronson_move_operation_duration_seconds` - Time spent on file move operations (labels: operation_type, cleanup_directory, target_directory)
+- `brronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation (labels: cleanup_directory, target_directory, dry_run)
+- `brronson_move_directories_moved` - Number of directories successfully moved (labels: cleanup_directory, target_directory, dry_run)
+- `brronson_move_batch_operations_total` - Total number of batch operations performed (labels: cleanup_directory, target_directory, batch_size, dry_run)
 
 The metrics endpoint is automatically exposed at `/metrics` and supports gzip compression for efficient data transfer.
 
@@ -335,8 +335,8 @@ pytest tests/test_main.py
 pytest --cov=app
 
 # Run tests in Docker
-docker build -t bronson-api .
-docker run --rm bronson-api pytest
+docker build -t brronson-api .
+docker run --rm brronson-api pytest
 ```
 
 ### Test Structure
@@ -395,7 +395,7 @@ This project uses several tools to ensure code quality and consistency:
 ### Project Structure
 
 ```
-bronson/
+brronson/
 ├── app/
 │   ├── __init__.py
 │   └── main.py          # FastAPI application
@@ -419,7 +419,7 @@ bronson/
 ### Building Docker Image
 
 ```bash
-docker build -t bronson-api .
+docker build -t brronson-api .
 ```
 
 ### Docker Health Checks
@@ -475,7 +475,7 @@ The application can be configured using environment variables:
 The application includes a configurable logging framework with the following environment variables:
 
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) (default: `INFO`)
-- `LOG_FILE`: Name of the log file (default: `bronson.log`)
+- `LOG_FILE`: Name of the log file (default: `brronson.log`)
 - `LOG_FORMAT`: Log message format (default: `%(asctime)s - %(name)s - %(levelname)s - %(message)s`)
 
 Logs are written to both console and a rotating file in the `logs/` directory. The log file is automatically rotated when it reaches 10MB and keeps up to 5 backup files.
@@ -483,7 +483,7 @@ Logs are written to both console and a rotating file in the `logs/` directory. T
 ### Example Log Output
 
 ```
-2024-01-15 10:30:15 - app.main - INFO - Starting Bronson application version 1.0.0
+2024-01-15 10:30:15 - app.main - INFO - Starting Brronson application version 1.0.0
 2024-01-15 10:30:15 - app.main - INFO - Cleanup directory: /data
 2024-01-15 10:30:15 - app.main - INFO - Target directory: /target
 2024-01-15 10:30:20 - app.main - INFO - Move operation: Found 3 subdirectories in cleanup, 1 in target
