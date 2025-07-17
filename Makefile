@@ -1,69 +1,87 @@
-.PHONY: help build run test clean docker-build docker-run docker-stop docker-logs
+.PHONY: help build run test clean lint format docker-build docker-run docker-test
 
 help: ## Show this help message
 	@echo "Available commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-build: ## Build the Docker image
-	docker build -t bronson .
+build: ## Build the application
+	python -m pip install -r requirements.txt
 
 run: ## Run the application locally
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 1968
+	python -m app.main
 
 test: ## Run tests
-	pytest -v
-
-test-coverage: ## Run tests with coverage
-	pytest --cov=app --cov-report=html
+	pytest
 
 clean: ## Clean up generated files
 	find . -type f -name "*.pyc" -delete
 	find . -type d -name "__pycache__" -delete
+	find . -type d -name "*.egg-info" -exec rm -rf {} +
 	rm -rf .pytest_cache
-	rm -rf htmlcov
+	rm -rf build/
+	rm -rf dist/
+
+lint: ## Run linting
+	flake8 app/ tests/
+	black --check app/ tests/
+	isort --check-only app/ tests/
+
+format: ## Format code
+	black app/ tests/
+	isort app/ tests/
 
 docker-build: ## Build Docker image
-	docker build -t bronson .
+	docker build -t brronson .
 
-docker-run: ## Run with Docker Compose
+docker-run: ## Run Docker container
+	docker run -p 1968:1968 brronson
+
+docker-test: ## Run tests in Docker
+	docker build -t brronson .
+	docker run --rm brronson pytest
+
+docker-compose-up: ## Start services with docker-compose
 	docker-compose up -d
 
-docker-stop: ## Stop Docker Compose services
+docker-compose-down: ## Stop services with docker-compose
 	docker-compose down
 
-docker-logs: ## Show Docker Compose logs
+docker-compose-logs: ## View docker-compose logs
 	docker-compose logs -f
-
-docker-clean: ## Clean up Docker resources
-	docker-compose down -v
-	docker system prune -f
-
-install: ## Install Python dependencies
-	pip install -r requirements.txt
 
 install-dev: ## Install development dependencies
 	pip install -r requirements-dev.txt
 
-test-docker: ## Run tests in Docker container
-	docker build -t bronson .
-	docker run --rm bronson pytest
-
-format: ## Format code with black
-	black app/ tests/ --line-length=79
-
-lint: ## Lint code with flake8
-	flake8 app/ tests/
-
-check: format lint ## Run all checks (format, lint)
-
-lint-fix: ## Auto-fix linting issues where possible
-	black app/ tests/ --line-length=79
-	autopep8 --in-place --recursive --aggressive --aggressive app/ tests/
-
-pre-commit-install: ## Install pre-commit hooks
+install-pre-commit: ## Install pre-commit hooks
 	pre-commit install
 
-pre-commit-run: ## Run pre-commit hooks on all files
+run-pre-commit: ## Run pre-commit on all files
 	pre-commit run --all-files
 
-ci-check: pre-commit-run test ## Run all CI checks
+setup-dev: install-dev install-pre-commit ## Setup development environment
+
+test-coverage: ## Run tests with coverage
+	pytest --cov=app --cov-report=html --cov-report=term-missing
+
+test-watch: ## Run tests in watch mode
+	pytest-watch
+
+clean-logs: ## Clean log files
+	rm -f *.log
+	rm -rf logs/
+
+clean-docker: ## Clean Docker images and containers
+	docker system prune -f
+	docker image prune -f
+
+clean-all: clean clean-logs clean-docker ## Clean everything
+
+help-docker: ## Show Docker-related commands
+	@echo "Docker commands:"
+	@echo "  docker-build      - Build Docker image"
+	@echo "  docker-run        - Run Docker container"
+	@echo "  docker-test       - Run tests in Docker"
+	@echo "  docker-compose-up - Start services with docker-compose"
+	@echo "  docker-compose-down - Stop services with docker-compose"
+	@echo "  docker-compose-logs - View docker-compose logs"
+	@echo "  clean-docker      - Clean Docker images and containers"

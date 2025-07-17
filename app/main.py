@@ -18,7 +18,7 @@ from .version import version
 def setup_logging():
     """Setup configurable logging for the application"""
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    log_file = os.getenv("LOG_FILE", "bronson.log")
+    log_file = os.getenv("LOG_FILE", "brronson.log")
     log_format = os.getenv(
         "LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
@@ -103,148 +103,148 @@ DEFAULT_UNWANTED_PATTERNS = [
 
 # Custom Prometheus metrics for file cleanup operations
 cleanup_files_found_total = Counter(
-    "bronson_cleanup_files_found_total",
+    "brronson_cleanup_files_found_total",
     "Total number of unwanted files found during cleanup",
     ["directory", "pattern", "dry_run"],
 )
 
 cleanup_current_files = Gauge(
-    "bronson_cleanup_current_files",
+    "brronson_cleanup_current_files",
     "Current number of unwanted files in directory",
     ["directory", "pattern", "dry_run"],
 )
 
 cleanup_files_removed_total = Counter(
-    "bronson_cleanup_files_removed_total",
+    "brronson_cleanup_files_removed_total",
     "Total number of files successfully removed during cleanup",
     ["directory", "pattern", "dry_run"],
 )
 
 cleanup_errors_total = Counter(
-    "bronson_cleanup_errors_total",
+    "brronson_cleanup_errors_total",
     "Total number of errors during file cleanup",
     ["directory", "error_type"],
 )
 
 cleanup_operation_duration = Histogram(
-    "bronson_cleanup_operation_duration_seconds",
+    "brronson_cleanup_operation_duration_seconds",
     "Time spent on cleanup operations",
     ["operation_type", "directory"],
 )
 
 cleanup_directory_size_bytes = Histogram(
-    "bronson_cleanup_directory_size_bytes",
+    "brronson_cleanup_directory_size_bytes",
     "Size of files found during cleanup",
     ["directory", "pattern"],
 )
 
 # Custom Prometheus metrics for file scan operations
 scan_files_found_total = Counter(
-    "bronson_scan_files_found_total",
+    "brronson_scan_files_found_total",
     "Total number of unwanted files found during scan",
     ["directory", "pattern"],
 )
 
 scan_current_files = Gauge(
-    "bronson_scan_current_files",
+    "brronson_scan_current_files",
     "Current number of unwanted files in directory",
     ["directory", "pattern"],
 )
 
 scan_errors_total = Counter(
-    "bronson_scan_errors_total",
+    "brronson_scan_errors_total",
     "Total number of errors during file scan",
     ["directory", "error_type"],
 )
 
 scan_operation_duration = Histogram(
-    "bronson_scan_operation_duration_seconds",
+    "brronson_scan_operation_duration_seconds",
     "Time spent on scan operations",
     ["operation_type", "directory"],
 )
 
 scan_directory_size_bytes = Histogram(
-    "bronson_scan_directory_size_bytes",
+    "brronson_scan_directory_size_bytes",
     "Size of files found during scan",
     ["directory", "pattern"],
 )
 
 # Custom Prometheus metrics for directory comparison operations
 comparison_duplicates_found_total = Gauge(
-    "bronson_comparison_duplicates_found_total",
+    "brronson_comparison_duplicates_found_total",
     "Current number of duplicate subdirectories found between directories",
     ["cleanup_directory", "target_directory"],
 )
 
 comparison_non_duplicates_found_total = Gauge(
-    "bronson_comparison_non_duplicates_found_total",
+    "brronson_comparison_non_duplicates_found_total",
     "Current number of non-duplicate subdirectories in cleanup directory",
     ["cleanup_directory", "target_directory"],
 )
 
 comparison_errors_total = Counter(
-    "bronson_comparison_errors_total",
+    "brronson_comparison_errors_total",
     "Total number of errors during directory comparison",
     ["directory", "error_type"],
 )
 
 comparison_operation_duration = Histogram(
-    "bronson_comparison_operation_duration_seconds",
+    "brronson_comparison_operation_duration_seconds",
     "Time spent on directory comparison operations",
     ["operation_type", "cleanup_directory", "target_directory"],
 )
 
 # Custom Prometheus metrics for subdirectory operations
 subdirectories_found_total = Counter(
-    "bronson_subdirectories_found_total",
+    "brronson_subdirectories_found_total",
     "Total number of subdirectories found",
     ["directory", "operation_type", "dry_run"],
 )
 
 # Custom Prometheus metrics for file move operations
 move_files_found_total = Counter(
-    "bronson_move_files_found_total",
+    "brronson_move_files_found_total",
     "Total number of files found for moving",
     ["cleanup_directory", "target_directory", "dry_run"],
 )
 
 move_files_moved_total = Counter(
-    "bronson_move_files_moved_total",
+    "brronson_move_files_moved_total",
     "Total number of files successfully moved",
     ["cleanup_directory", "target_directory", "dry_run"],
 )
 
 move_errors_total = Counter(
-    "bronson_move_errors_total",
+    "brronson_move_errors_total",
     "Total number of errors during file move operations",
     ["cleanup_directory", "target_directory", "error_type"],
 )
 
 move_operation_duration = Histogram(
-    "bronson_move_operation_duration_seconds",
+    "brronson_move_operation_duration_seconds",
     "Time spent on file move operations",
     ["operation_type", "cleanup_directory", "target_directory"],
 )
 
 move_duplicates_found = Gauge(
-    "bronson_move_duplicates_found",
+    "brronson_move_duplicates_found",
     "Number of duplicate subdirectories found during move operation",
     ["cleanup_directory", "target_directory", "dry_run"],
 )
 
 move_directories_moved = Gauge(
-    "bronson_move_directories_moved",
+    "brronson_move_directories_moved",
     "Number of directories successfully moved",
     ["cleanup_directory", "target_directory", "dry_run"],
 )
 
 move_batch_operations_total = Counter(
-    "bronson_move_batch_operations_total",
+    "brronson_move_batch_operations_total",
     "Total number of batch operations performed",
     ["cleanup_directory", "target_directory", "batch_size", "dry_run"],
 )
 
-bronson_info = Gauge("bronson_info", "Info about the server", ["version"])
+brronson_info = Gauge("brronson_info", "Info about the server", ["version"])
 
 
 def validate_directory(
@@ -401,10 +401,10 @@ def get_subdirectories(
 
 
 # Create FastAPI app
-app = FastAPI(title="Bronson", version=version)
+app = FastAPI(title="Brronson", version=version)
 
 # Log application startup
-logger.info(f"Starting Bronson application version {version}")
+logger.info(f"Starting Brronson application version {version}")
 logger.info(f"Cleanup directory: {get_cleanup_directory()}")
 logger.info(f"Target directory: {get_target_directory()}")
 
@@ -433,20 +433,21 @@ instrumentator.instrument(app).expose(
     app, include_in_schema=False, should_gzip=True
 )
 
-bronson_info.labels(version=version).set(1)
+# Set info metric
+brronson_info.labels(version=version).set(1)
 
 
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {"message": "Welcome to Bronson", "version": version}
+    return {"message": "Welcome to Brronson", "version": version}
 
 
 @app.get("/version")
 async def get_version():
     """Version endpoint"""
     return {
-        "message": f"The current version of Bronson is {version}",
+        "message": f"The current version of Brronson is {version}",
         "version": version,
     }
 
@@ -456,7 +457,7 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "service": "bronson",
+        "service": "brronson",
         "version": version,
         "timestamp": time.time(),
     }
@@ -995,5 +996,5 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("Starting Bronson server on 0.0.0.0:1968")
+    logger.info("Starting Brronson server on 0.0.0.0:1968")
     uvicorn.run(app, host="0.0.0.0", port=1968)

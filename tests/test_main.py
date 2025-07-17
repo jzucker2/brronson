@@ -25,7 +25,7 @@ class TestMainEndpoints(unittest.TestCase):
         response = client.get("/")
         assert response.status_code == 200
         data = response.json()
-        assert data["message"] == "Welcome to Bronson"
+        assert data["message"] == "Welcome to Brronson"
         assert data["version"] == version
 
     def test_health_check(self):
@@ -37,7 +37,7 @@ class TestMainEndpoints(unittest.TestCase):
         assert "service" in data
         assert "version" in data
         assert "timestamp" in data
-        assert data["service"] == "bronson"
+        assert data["service"] == "brronson"
         assert data["status"] == "healthy"
         assert data["version"] == version
         assert isinstance(data["timestamp"], (int, float))
@@ -48,7 +48,7 @@ class TestMainEndpoints(unittest.TestCase):
         assert response.status_code == 200
         data = response.json()
         assert (
-            data["message"] == f"The current version of Bronson is {version}"
+            data["message"] == f"The current version of Brronson is {version}"
         )
         assert data["version"] == version
 
@@ -214,7 +214,7 @@ class TestCleanupEndpoints(unittest.TestCase):
         # Check for a known pattern
         assert_metric_with_labels(
             metrics_text,
-            "bronson_cleanup_files_found_total",
+            "brronson_cleanup_files_found_total",
             {
                 "directory": normalize_path_for_metrics(self.test_path),
                 "pattern": r"www\\.YTS\\.MX\\.jpg$",
@@ -224,7 +224,7 @@ class TestCleanupEndpoints(unittest.TestCase):
         )
         assert_metric_with_labels(
             metrics_text,
-            "bronson_cleanup_current_files",
+            "brronson_cleanup_current_files",
             {
                 "directory": normalize_path_for_metrics(self.test_path),
                 "pattern": r"www\\.YTS\\.MX\\.jpg$",
@@ -257,7 +257,7 @@ class TestCleanupEndpoints(unittest.TestCase):
         # Check for a known pattern
         assert_metric_with_labels(
             metrics_text,
-            "bronson_cleanup_files_found_total",
+            "brronson_cleanup_files_found_total",
             {
                 "directory": normalize_path_for_metrics(self.test_path),
                 "pattern": r"www\\.YTS\\.MX\\.jpg$",
@@ -267,7 +267,7 @@ class TestCleanupEndpoints(unittest.TestCase):
         )
         assert_metric_with_labels(
             metrics_text,
-            "bronson_cleanup_files_removed_total",
+            "brronson_cleanup_files_removed_total",
             {
                 "directory": normalize_path_for_metrics(self.test_path),
                 "pattern": r"www\\.YTS\\.MX\\.jpg$",
@@ -277,7 +277,7 @@ class TestCleanupEndpoints(unittest.TestCase):
         )
         assert_metric_with_labels(
             metrics_text,
-            "bronson_cleanup_current_files",
+            "brronson_cleanup_current_files",
             {
                 "directory": normalize_path_for_metrics(self.test_path),
                 "pattern": r"www\\.YTS\\.MX\\.jpg$",
@@ -499,7 +499,7 @@ class TestSharedHelperMethods(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have subdirectory metrics
-        self.assertIn("bronson_subdirectories_found_total", metrics_text)
+        self.assertIn("brronson_subdirectories_found_total", metrics_text)
 
 
 class TestMetricsBehavior(unittest.TestCase):
@@ -554,10 +554,10 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have scan metrics
-        self.assertIn("bronson_scan_files_found_total", metrics_text)
-        self.assertIn("bronson_scan_current_files", metrics_text)
-        self.assertIn("bronson_scan_operation_duration_seconds", metrics_text)
-        self.assertIn("bronson_scan_directory_size_bytes", metrics_text)
+        self.assertIn("brronson_scan_files_found_total", metrics_text)
+        self.assertIn("brronson_scan_current_files", metrics_text)
+        self.assertIn("brronson_scan_operation_duration_seconds", metrics_text)
+        self.assertIn("brronson_scan_directory_size_bytes", metrics_text)
 
     def test_scan_metrics_with_no_files_found(self):
         """Test scan metrics when no files are found (zero-out behavior)"""
@@ -576,8 +576,8 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have scan metrics even with zero files
-        self.assertIn("bronson_scan_files_found_total", metrics_text)
-        self.assertIn("bronson_scan_operation_duration_seconds", metrics_text)
+        self.assertIn("brronson_scan_files_found_total", metrics_text)
+        self.assertIn("brronson_scan_operation_duration_seconds", metrics_text)
 
     def test_cleanup_metrics_with_files_found(self):
         """Test cleanup metrics when files are found"""
@@ -594,12 +594,12 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have cleanup metrics
-        self.assertIn("bronson_cleanup_files_found_total", metrics_text)
-        self.assertIn("bronson_cleanup_current_files", metrics_text)
+        self.assertIn("brronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("brronson_cleanup_current_files", metrics_text)
         self.assertIn(
-            "bronson_cleanup_operation_duration_seconds", metrics_text
+            "brronson_cleanup_operation_duration_seconds", metrics_text
         )
-        self.assertIn("bronson_cleanup_directory_size_bytes", metrics_text)
+        self.assertIn("brronson_cleanup_directory_size_bytes", metrics_text)
 
     def test_cleanup_metrics_with_no_files_found(self):
         """Test cleanup metrics when no files are found (zero-out behavior)"""
@@ -618,10 +618,10 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have cleanup metrics even with zero files
-        self.assertIn("bronson_cleanup_files_found_total", metrics_text)
-        self.assertIn("bronson_cleanup_current_files", metrics_text)
+        self.assertIn("brronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("brronson_cleanup_current_files", metrics_text)
         self.assertIn(
-            "bronson_cleanup_operation_duration_seconds", metrics_text
+            "brronson_cleanup_operation_duration_seconds", metrics_text
         )
 
     def test_cleanup_metrics_with_actual_removal(self):
@@ -641,7 +641,7 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have removal metrics
-        self.assertIn("bronson_cleanup_files_removed_total", metrics_text)
+        self.assertIn("brronson_cleanup_files_removed_total", metrics_text)
 
     def test_metrics_operation_type_differentiation(self):
         """Test that scan and cleanup operations record different metrics"""
@@ -659,13 +659,13 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have both scan and cleanup metrics
-        self.assertIn("bronson_scan_files_found_total", metrics_text)
-        self.assertIn("bronson_scan_current_files", metrics_text)
-        self.assertIn("bronson_cleanup_files_found_total", metrics_text)
-        self.assertIn("bronson_cleanup_current_files", metrics_text)
-        self.assertIn("bronson_scan_operation_duration_seconds", metrics_text)
+        self.assertIn("brronson_scan_files_found_total", metrics_text)
+        self.assertIn("brronson_scan_current_files", metrics_text)
+        self.assertIn("brronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("brronson_cleanup_current_files", metrics_text)
+        self.assertIn("brronson_scan_operation_duration_seconds", metrics_text)
         self.assertIn(
-            "bronson_cleanup_operation_duration_seconds", metrics_text
+            "brronson_cleanup_operation_duration_seconds", metrics_text
         )
 
     def test_error_metrics(self):
@@ -682,7 +682,7 @@ class TestMetricsBehavior(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have error metrics
-        self.assertIn("bronson_scan_errors_total", metrics_text)
+        self.assertIn("brronson_scan_errors_total", metrics_text)
 
 
 class TestDirectoryComparison(unittest.TestCase):
@@ -824,11 +824,11 @@ class TestDirectoryComparison(unittest.TestCase):
 
         # Should have comparison metrics with value 0
         self.assertIn(
-            "bronson_comparison_duplicates_found_total", metrics_text
+            "brronson_comparison_duplicates_found_total", metrics_text
         )
         # The metric should be present but with value 0
         self.assertIn(
-            f'bronson_comparison_duplicates_found_total{{cleanup_directory="{normalize_path_for_metrics(self.cleanup_dir)}",target_directory="{normalize_path_for_metrics(self.target_dir)}"}} 0.0',
+            f'brronson_comparison_duplicates_found_total{{cleanup_directory="{normalize_path_for_metrics(self.cleanup_dir)}",target_directory="{normalize_path_for_metrics(self.target_dir)}"}} 0.0',
             metrics_text,
         )
 
@@ -860,11 +860,11 @@ class TestDirectoryComparison(unittest.TestCase):
 
         # Should have comparison metrics with value 0
         self.assertIn(
-            "bronson_comparison_duplicates_found_total", metrics_text
+            "brronson_comparison_duplicates_found_total", metrics_text
         )
         # The metric should be present but with value 0
         self.assertIn(
-            f'bronson_comparison_duplicates_found_total{{cleanup_directory="{normalize_path_for_metrics(self.cleanup_dir)}",target_directory="{normalize_path_for_metrics(self.target_dir)}"}} 0.0',
+            f'brronson_comparison_duplicates_found_total{{cleanup_directory="{normalize_path_for_metrics(self.cleanup_dir)}",target_directory="{normalize_path_for_metrics(self.target_dir)}"}} 0.0',
             metrics_text,
         )
 
@@ -893,13 +893,13 @@ class TestDirectoryComparison(unittest.TestCase):
 
         # Should have comparison metrics
         self.assertIn(
-            "bronson_comparison_duplicates_found_total", metrics_text
+            "brronson_comparison_duplicates_found_total", metrics_text
         )
         self.assertIn(
-            "bronson_comparison_non_duplicates_found_total", metrics_text
+            "brronson_comparison_non_duplicates_found_total", metrics_text
         )
         self.assertIn(
-            "bronson_comparison_operation_duration_seconds", metrics_text
+            "brronson_comparison_operation_duration_seconds", metrics_text
         )
         # Should NOT have subdirectory metrics for comparison operations
         # (only duplicates and non-duplicates are counted, not all subdirectories)
@@ -911,7 +911,7 @@ class TestDirectoryComparison(unittest.TestCase):
         # Check duplicates metric (should be 2: shared_dir1, shared_dir2)
         assert_metric_with_labels(
             metrics_text,
-            "bronson_comparison_duplicates_found_total",
+            "brronson_comparison_duplicates_found_total",
             {
                 "cleanup_directory": cleanup_path_resolved,
                 "target_directory": target_path_resolved,
@@ -922,7 +922,7 @@ class TestDirectoryComparison(unittest.TestCase):
         # Check non-duplicates metric (should be 1: cleanup_only)
         assert_metric_with_labels(
             metrics_text,
-            "bronson_comparison_non_duplicates_found_total",
+            "brronson_comparison_non_duplicates_found_total",
             {
                 "cleanup_directory": cleanup_path_resolved,
                 "target_directory": target_path_resolved,
@@ -1181,7 +1181,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
 
         assert_metric_with_labels(
             metrics_text,
-            "bronson_move_batch_operations_total",
+            "brronson_move_batch_operations_total",
             {
                 "cleanup_directory": cleanup_path_resolved,
                 "target_directory": target_path_resolved,
@@ -1256,11 +1256,11 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have move metrics
-        self.assertIn("bronson_move_files_found_total", metrics_text)
-        self.assertIn("bronson_move_operation_duration_seconds", metrics_text)
-        self.assertIn("bronson_move_duplicates_found", metrics_text)
-        self.assertIn("bronson_move_directories_moved", metrics_text)
-        self.assertIn("bronson_move_batch_operations_total", metrics_text)
+        self.assertIn("brronson_move_files_found_total", metrics_text)
+        self.assertIn("brronson_move_operation_duration_seconds", metrics_text)
+        self.assertIn("brronson_move_duplicates_found", metrics_text)
+        self.assertIn("brronson_move_directories_moved", metrics_text)
+        self.assertIn("brronson_move_batch_operations_total", metrics_text)
 
         # Use the resolved path format that appears in the metrics
         cleanup_path_resolved = normalize_path_for_metrics(self.cleanup_dir)
@@ -1268,7 +1268,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         # Check gauge metrics for duplicates found (should be 2: shared_dir1, shared_dir2)
         assert_metric_with_labels(
             metrics_text,
-            "bronson_move_duplicates_found",
+            "brronson_move_duplicates_found",
             {
                 "cleanup_directory": cleanup_path_resolved,
                 "target_directory": target_path_resolved,
@@ -1279,7 +1279,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         # Check gauge metrics for directories moved (dry run shows what would be moved, but limited by batch_size=1)
         assert_metric_with_labels(
             metrics_text,
-            "bronson_move_directories_moved",
+            "brronson_move_directories_moved",
             {
                 "cleanup_directory": cleanup_path_resolved,
                 "target_directory": target_path_resolved,
@@ -1291,7 +1291,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         # Check batch operations metric
         assert_metric_with_labels(
             metrics_text,
-            "bronson_move_batch_operations_total",
+            "brronson_move_batch_operations_total",
             {
                 "cleanup_directory": cleanup_path_resolved,
                 "target_directory": target_path_resolved,
@@ -1401,11 +1401,11 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have move metrics with dry_run=false
-        self.assertIn("bronson_move_files_found_total", metrics_text)
-        self.assertIn("bronson_move_operation_duration_seconds", metrics_text)
-        self.assertIn("bronson_move_duplicates_found", metrics_text)
-        self.assertIn("bronson_move_directories_moved", metrics_text)
-        self.assertIn("bronson_move_batch_operations_total", metrics_text)
+        self.assertIn("brronson_move_files_found_total", metrics_text)
+        self.assertIn("brronson_move_operation_duration_seconds", metrics_text)
+        self.assertIn("brronson_move_duplicates_found", metrics_text)
+        self.assertIn("brronson_move_directories_moved", metrics_text)
+        self.assertIn("brronson_move_batch_operations_total", metrics_text)
 
         # Use the resolved path format that appears in the metrics
         cleanup_path_resolved = normalize_path_for_metrics(self.cleanup_dir)
@@ -1413,7 +1413,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         # Check gauge metrics for duplicates found with dry_run=false
         assert_metric_with_labels(
             metrics_text,
-            "bronson_move_duplicates_found",
+            "brronson_move_duplicates_found",
             {
                 "cleanup_directory": cleanup_path_resolved,
                 "target_directory": target_path_resolved,
@@ -1424,7 +1424,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         # Check gauge metrics for directories moved with dry_run=false (limited by batch_size=1)
         assert_metric_with_labels(
             metrics_text,
-            "bronson_move_directories_moved",
+            "brronson_move_directories_moved",
             {
                 "cleanup_directory": cleanup_path_resolved,
                 "target_directory": target_path_resolved,
@@ -1436,7 +1436,7 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         # Check batch operations metric
         assert_metric_with_labels(
             metrics_text,
-            "bronson_move_batch_operations_total",
+            "brronson_move_batch_operations_total",
             {
                 "cleanup_directory": cleanup_path_resolved,
                 "target_directory": target_path_resolved,
