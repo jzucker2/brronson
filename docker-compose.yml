@@ -1,26 +1,19 @@
-version: '3.8'
-
 services:
   brronson:
     container_name: brronson
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "1968:1968"
     environment:
-      - CLEANUP_DIRECTORY=/cleanup
+      - PROMETHEUS_MULTIPROC_DIR=/tmp
+      - ENABLE_METRICS=true
+      - CLEANUP_DIRECTORY=/data
       - TARGET_DIRECTORY=/target
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
+      - LOG_LEVEL=INFO
       - LOG_FILE=brronson.log
-    volumes:
-      - ./cleanup:/cleanup
-      - ./target:/target
-    depends_on:
-      - redis
-
-  redis:
-    image: redis:7-alpine
-    container_name: brronson-redis
-    ports:
-      - "6379:6379"
+      - LOG_FORMAT=%(asctime)s - %(name)s - %(levelname)s - %(message)s
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
