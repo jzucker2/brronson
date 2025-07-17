@@ -1,6 +1,6 @@
 # Brronson
 
-A FastAPI application with Docker containerization, Prometheus metrics, and comprehensive unit tests.
+A simple self hosted application for helping with media management for the -arr stack.
 
 ## Features
 
