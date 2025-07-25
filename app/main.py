@@ -463,24 +463,6 @@ async def health_check():
     }
 
 
-@app.get("/api/v1/items")
-async def get_items():
-    """Get list of items"""
-    return {"items": ["item1", "item2", "item3"]}
-
-
-@app.post("/api/v1/items")
-async def create_item(item: dict):
-    """Create a new item"""
-    return {"message": "Item created", "item": item}
-
-
-@app.get("/api/v1/items/{item_id}")
-async def get_item(item_id: int):
-    """Get a specific item by ID"""
-    return {"item_id": item_id, "name": f"Item {item_id}"}
-
-
 @app.post("/api/v1/cleanup/files")
 async def cleanup_unwanted_files(
     dry_run: bool = True, patterns: Optional[List[str]] = Body(None)
