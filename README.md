@@ -198,23 +198,29 @@ curl "http://localhost:1968/api/v1/compare/directories?verbose=true"
 
 #### File Move Usage
 
-The file move endpoint helps move non-duplicate subdirectories from the cleanup directory to the target directory, reusing the existing directory comparison logic.
+The file move endpoint helps move non-duplicate subdirectories from the cleanup directory to the target directory, reusing the existing directory comparison logic. **By default, this endpoint runs cleanup files before moving to remove unwanted files from the directories being moved.**
 
 **Configuration:**
 
 - `CLEANUP_DIRECTORY` - Source directory containing subdirectories to move (default: `/tmp`)
 - `TARGET_DIRECTORY` - Destination directory for non-duplicate subdirectories (default: `/tmp`)
 
-**Move non-duplicate directories (dry run - default):**
+**Move non-duplicate directories (dry run - default, with cleanup):**
 
 ```bash
 curl -X POST "http://localhost:1968/api/v1/move/non-duplicates"
 ```
 
-**Move non-duplicate directories (actual move):**
+**Move non-duplicate directories (actual move, with cleanup):**
 
 ```bash
 curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false"
+```
+
+**Skip cleanup and just move files:**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?skip_cleanup=true"
 ```
 
 **Move non-duplicate directories with custom batch size:**
@@ -223,7 +229,13 @@ curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false"
 curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false&batch_size=5"
 ```
 
-**Response format:**
+**Move with cleanup disabled and custom batch size:**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?skip_cleanup=true&batch_size=3"
+```
+
+**Response format (with cleanup):**
 
 ```json
 {
@@ -231,6 +243,37 @@ curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false&bat
   "target_directory": "/path/to/target",
   "dry_run": true,
   "batch_size": 1,
+  "skip_cleanup": false,
+  "non_duplicates_found": 2,
+  "files_moved": 1,
+  "errors": 0,
+  "non_duplicate_subdirectories": ["cleanup_only", "another_cleanup_only"],
+  "moved_subdirectories": ["cleanup_only"],
+  "error_details": [],
+  "remaining_files": 1,
+  "cleanup_results": {
+    "directory": "/path/to/cleanup",
+    "dry_run": true,
+    "patterns_used": ["www\\.YTS\\.MX\\.jpg$", "\\.DS_Store$", ...],
+    "files_found": 3,
+    "files_removed": 0,
+    "errors": 0,
+    "found_files": ["/path/to/cleanup/file1.jpg", "/path/to/cleanup/file2.txt"],
+    "removed_files": [],
+    "error_details": []
+  }
+}
+```
+
+**Response format (skip cleanup):**
+
+```json
+{
+  "cleanup_directory": "/path/to/cleanup",
+  "target_directory": "/path/to/target",
+  "dry_run": true,
+  "batch_size": 1,
+  "skip_cleanup": true,
   "non_duplicates_found": 2,
   "files_moved": 1,
   "errors": 0,
@@ -243,23 +286,38 @@ curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?dry_run=false&bat
 
 **Features:**
 
+- **Cleanup Integration**: By default, runs cleanup files before moving to remove unwanted files
+- **Skip Cleanup Option**: Use `skip_cleanup=true` to bypass the cleanup step
 - **Safe by Default**: Default `dry_run=true` prevents accidental moves
 - **Batch Processing**: Default `batch_size=1` processes one file at a time for controlled operations
 - **Duplicate Detection**: Only moves subdirectories that don't exist in target directory
-- **Error Handling**: Comprehensive error reporting for failed moves
+- **Error Handling**: Comprehensive error reporting for failed moves and cleanup operations
 - **File Preservation**: Preserves all file contents during moves
 - **Cross-Device Support**: Uses `shutil.move()` for cross-device compatibility
-- **Detailed Reporting**: Provides complete information about what was moved
+- **Detailed Reporting**: Provides complete information about what was moved and cleaned
 - **Progress Tracking**: `remaining_files` field shows how many files still need to be moved
-- **Prometheus Metrics**: Records move operations and duplicate counts
+- **Prometheus Metrics**: Records both move operations and cleanup operations
+
+**Cleanup Integration:**
+
+The move operation now includes automatic cleanup by default:
+
+- **Default Behavior**: Runs cleanup files before moving directories
+- **Cleanup Patterns**: Uses the same default patterns as the standalone cleanup endpoint
+- **Cleanup Mode**: Respects the `dry_run` parameter (cleanup is dry run if move is dry run)
+- **Error Resilience**: If cleanup fails, the move operation continues anyway
+- **Results Included**: Cleanup results are included in the move response
+- **Skip Option**: Use `skip_cleanup=true` to disable the cleanup step
 
 **Safety Features:**
 
 - Default `dry_run=true` prevents accidental moves
+- Default cleanup integration removes unwanted files before moving
 - Only moves subdirectories (ignores individual files)
 - Preserves existing files in target directory
 - Comprehensive error reporting for failed operations
 - Uses existing directory validation and security checks
+- Cleanup failures don't prevent move operations from continuing
 
 ## Monitoring
 

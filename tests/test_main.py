@@ -1237,7 +1237,21 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         os.environ["CLEANUP_DIRECTORY"] = "/nonexistent/cleanup"
 
         response = client.post("/api/v1/move/non-duplicates")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check that cleanup was attempted but failed
+        self.assertIn("cleanup_results", data)
+        self.assertFalse(data["skip_cleanup"])
+
+        cleanup_results = data["cleanup_results"]
+        self.assertIn("error", cleanup_results)
+
+        # Move operation should still work normally (no files to move)
+        self.assertIn("non_duplicates_found", data)
+        self.assertIn("files_moved", data)
+        self.assertEqual(data["non_duplicates_found"], 0)
+        self.assertEqual(data["files_moved"], 0)
 
     def test_move_non_duplicates_nonexistent_target(self):
         """Test move non-duplicates with nonexistent target directory"""
@@ -1445,6 +1459,244 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
             },
             "1.0",
         )
+
+    def test_move_non_duplicates_with_cleanup_by_default(self):
+        """Test that move non-duplicates runs cleanup by default"""
+        # Add some unwanted files to the cleanup directories
+        (self.cleanup_dir / "cleanup_only" / "www.YTS.MX.jpg").touch()
+        (self.cleanup_dir / "cleanup_only" / ".DS_Store").touch()
+        (self.cleanup_dir / "another_cleanup_only" / "www.YTS.AM.jpg").touch()
+        (self.cleanup_dir / "another_cleanup_only" / "Thumbs.db").touch()
+
+        response = client.post("/api/v1/move/non-duplicates?dry_run=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check that cleanup was performed by default
+        self.assertIn("cleanup_results", data)
+        self.assertFalse(data["skip_cleanup"])
+
+        cleanup_results = data["cleanup_results"]
+        self.assertIn("files_found", cleanup_results)
+        self.assertIn("files_removed", cleanup_results)
+        self.assertIn("dry_run", cleanup_results)
+        self.assertTrue(cleanup_results["dry_run"])  # Should be dry run
+
+        # Verify unwanted files still exist (dry run)
+        self.assertTrue(
+            (self.cleanup_dir / "cleanup_only" / "www.YTS.MX.jpg").exists()
+        )
+        self.assertTrue(
+            (self.cleanup_dir / "cleanup_only" / ".DS_Store").exists()
+        )
+        self.assertTrue(
+            (
+                self.cleanup_dir / "another_cleanup_only" / "www.YTS.AM.jpg"
+            ).exists()
+        )
+        self.assertTrue(
+            (self.cleanup_dir / "another_cleanup_only" / "Thumbs.db").exists()
+        )
+
+    def test_move_non_duplicates_with_cleanup_actual_removal(self):
+        """Test that move non-duplicates runs cleanup with actual removal"""
+        # Add some unwanted files to the cleanup directories
+        (self.cleanup_dir / "cleanup_only" / "www.YTS.MX.jpg").touch()
+        (self.cleanup_dir / "cleanup_only" / ".DS_Store").touch()
+        (self.cleanup_dir / "another_cleanup_only" / "www.YTS.AM.jpg").touch()
+        (self.cleanup_dir / "another_cleanup_only" / "Thumbs.db").touch()
+
+        response = client.post("/api/v1/move/non-duplicates?dry_run=false")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check that cleanup was performed
+        self.assertIn("cleanup_results", data)
+        self.assertFalse(data["skip_cleanup"])
+
+        cleanup_results = data["cleanup_results"]
+        self.assertIn("files_found", cleanup_results)
+        self.assertIn("files_removed", cleanup_results)
+        self.assertFalse(
+            cleanup_results["dry_run"]
+        )  # Should be actual removal
+
+        # Verify unwanted files were removed
+        self.assertFalse(
+            (self.cleanup_dir / "cleanup_only" / "www.YTS.MX.jpg").exists()
+        )
+        self.assertFalse(
+            (self.cleanup_dir / "cleanup_only" / ".DS_Store").exists()
+        )
+        self.assertFalse(
+            (
+                self.cleanup_dir / "another_cleanup_only" / "www.YTS.AM.jpg"
+            ).exists()
+        )
+        self.assertFalse(
+            (self.cleanup_dir / "another_cleanup_only" / "Thumbs.db").exists()
+        )
+
+    def test_move_non_duplicates_skip_cleanup(self):
+        """Test that move non-duplicates can skip cleanup when requested"""
+        # Add some unwanted files to the cleanup directories
+        (self.cleanup_dir / "cleanup_only" / "www.YTS.MX.jpg").touch()
+        (self.cleanup_dir / "cleanup_only" / ".DS_Store").touch()
+        (self.cleanup_dir / "another_cleanup_only" / "www.YTS.AM.jpg").touch()
+
+        response = client.post(
+            "/api/v1/move/non-duplicates?skip_cleanup=true&dry_run=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check that cleanup was skipped
+        self.assertTrue(data["skip_cleanup"])
+        self.assertNotIn("cleanup_results", data)
+
+        # Verify unwanted files still exist (cleanup was skipped)
+        self.assertTrue(
+            (self.cleanup_dir / "cleanup_only" / "www.YTS.MX.jpg").exists()
+        )
+        self.assertTrue(
+            (self.cleanup_dir / "cleanup_only" / ".DS_Store").exists()
+        )
+        self.assertTrue(
+            (
+                self.cleanup_dir / "another_cleanup_only" / "www.YTS.AM.jpg"
+            ).exists()
+        )
+
+    def test_move_non_duplicates_cleanup_failure_continues(self):
+        """Test that move operation continues even if cleanup fails"""
+        # Create a scenario where cleanup will fail but move can continue
+        # by temporarily setting a system directory that will cause cleanup to fail
+        original_cleanup_dir = os.environ.get("CLEANUP_DIRECTORY")
+
+        # Temporarily set a system directory that will cause cleanup to fail
+        os.environ["CLEANUP_DIRECTORY"] = "/etc"
+
+        response = client.post("/api/v1/move/non-duplicates?dry_run=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check that cleanup was attempted but failed
+        self.assertIn("cleanup_results", data)
+        self.assertFalse(data["skip_cleanup"])
+
+        cleanup_results = data["cleanup_results"]
+        self.assertIn("error", cleanup_results)
+
+        # Move operation should still work normally
+        self.assertIn("non_duplicates_found", data)
+        self.assertIn("files_moved", data)
+
+        # Restore original cleanup directory
+        if original_cleanup_dir is not None:
+            os.environ["CLEANUP_DIRECTORY"] = original_cleanup_dir
+        else:
+            del os.environ["CLEANUP_DIRECTORY"]
+
+    def test_move_non_duplicates_cleanup_with_custom_patterns(self):
+        """Test that move operation uses default cleanup patterns"""
+        # Add files that match default patterns and custom files
+        (self.cleanup_dir / "cleanup_only" / "www.YTS.MX.jpg").touch()
+        (self.cleanup_dir / "cleanup_only" / "custom_file.txt").touch()
+        (self.cleanup_dir / "another_cleanup_only" / ".DS_Store").touch()
+        (self.cleanup_dir / "another_cleanup_only" / "normal_file.txt").touch()
+
+        response = client.post("/api/v1/move/non-duplicates?dry_run=false")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check that cleanup was performed with default patterns
+        cleanup_results = data["cleanup_results"]
+        self.assertIn("patterns_used", cleanup_results)
+        self.assertIn("files_found", cleanup_results)
+        self.assertIn("files_removed", cleanup_results)
+
+        # Should have found and removed unwanted files (www.YTS.MX.jpg, .DS_Store)
+        self.assertGreater(cleanup_results["files_found"], 0)
+        self.assertGreater(cleanup_results["files_removed"], 0)
+
+        # Verify unwanted files were removed
+        self.assertFalse(
+            (self.cleanup_dir / "cleanup_only" / "www.YTS.MX.jpg").exists()
+        )
+        self.assertFalse(
+            (self.cleanup_dir / "another_cleanup_only" / ".DS_Store").exists()
+        )
+
+        # Verify normal files still exist (note: another_cleanup_only was moved, so check in target)
+        self.assertTrue(
+            (self.cleanup_dir / "cleanup_only" / "custom_file.txt").exists()
+        )
+        self.assertTrue(
+            (
+                self.target_dir / "another_cleanup_only" / "normal_file.txt"
+            ).exists()
+        )
+
+    def test_move_non_duplicates_response_structure_with_cleanup(self):
+        """Test that move response includes cleanup information when cleanup is performed"""
+        response = client.post("/api/v1/move/non-duplicates")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check response structure includes cleanup-related fields
+        self.assertIn("skip_cleanup", data)
+        self.assertIn("cleanup_results", data)
+
+        # Check cleanup results structure
+        cleanup_results = data["cleanup_results"]
+        self.assertIn("directory", cleanup_results)
+        self.assertIn("dry_run", cleanup_results)
+        self.assertIn("patterns_used", cleanup_results)
+        self.assertIn("files_found", cleanup_results)
+        self.assertIn("files_removed", cleanup_results)
+        self.assertIn("errors", cleanup_results)
+        self.assertIn("found_files", cleanup_results)
+        self.assertIn("removed_files", cleanup_results)
+        self.assertIn("error_details", cleanup_results)
+
+    def test_move_non_duplicates_response_structure_without_cleanup(self):
+        """Test that move response excludes cleanup information when cleanup is skipped"""
+        response = client.post("/api/v1/move/non-duplicates?skip_cleanup=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Check response structure excludes cleanup-related fields
+        self.assertIn("skip_cleanup", data)
+        self.assertTrue(data["skip_cleanup"])
+        self.assertNotIn("cleanup_results", data)
+
+    def test_move_non_duplicates_cleanup_metrics_integration(self):
+        """Test that move operation with cleanup records both move and cleanup metrics"""
+        # Add unwanted files to trigger cleanup
+        (self.cleanup_dir / "cleanup_only" / "www.YTS.MX.jpg").touch()
+        (self.cleanup_dir / "another_cleanup_only" / ".DS_Store").touch()
+
+        response = client.post("/api/v1/move/non-duplicates?dry_run=false")
+        self.assertEqual(response.status_code, 200)
+
+        # Check metrics for both move and cleanup operations
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have move metrics
+        self.assertIn("brronson_move_files_found_total", metrics_text)
+        self.assertIn("brronson_move_operation_duration_seconds", metrics_text)
+        self.assertIn("brronson_move_duplicates_found", metrics_text)
+        self.assertIn("brronson_move_directories_moved", metrics_text)
+        self.assertIn("brronson_move_batch_operations_total", metrics_text)
+
+        # Should also have cleanup metrics
+        self.assertIn("brronson_cleanup_files_found_total", metrics_text)
+        self.assertIn("brronson_cleanup_files_removed_total", metrics_text)
+        self.assertIn(
+            "brronson_cleanup_operation_duration_seconds", metrics_text
+        )
+        self.assertIn("brronson_cleanup_directory_size_bytes", metrics_text)
 
 
 def assert_metric_with_labels(metrics_text, metric_name, labels, value):
