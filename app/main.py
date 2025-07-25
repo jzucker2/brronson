@@ -463,16 +463,19 @@ async def health_check():
     }
 
 
-@app.post("/api/v1/cleanup/files")
-async def cleanup_unwanted_files(
-    dry_run: bool = True, patterns: Optional[List[str]] = Body(None)
+def perform_cleanup_internal(
+    dry_run: bool = True, patterns: Optional[List[str]] = None
 ):
     """
-    Recursively search the configured directory and remove unwanted files.
+    Internal helper function to perform cleanup operations.
+    This can be called from other functions without the Body parameter issues.
 
     Args:
         dry_run: If True, only show what would be deleted (default: True)
         patterns: List of regex patterns to match unwanted files
+
+    Returns:
+        dict: Cleanup results
     """
     start_time = time.time()
     cleanup_dir = get_cleanup_directory()
@@ -621,6 +624,20 @@ async def cleanup_unwanted_files(
         raise HTTPException(
             status_code=500, detail=f"Error during cleanup: {str(e)}"
         )
+
+
+@app.post("/api/v1/cleanup/files")
+async def cleanup_unwanted_files(
+    dry_run: bool = True, patterns: Optional[List[str]] = Body(None)
+):
+    """
+    Recursively search the configured directory and remove unwanted files.
+
+    Args:
+        dry_run: If True, only show what would be deleted (default: True)
+        patterns: List of regex patterns to match unwanted files
+    """
+    return perform_cleanup_internal(dry_run, patterns)
 
 
 @app.get("/api/v1/cleanup/scan")
@@ -809,16 +826,22 @@ async def compare_directories(verbose: bool = False):
 
 
 @app.post("/api/v1/move/non-duplicates")
-async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
+async def move_non_duplicate_files(
+    dry_run: bool = True, batch_size: int = 1, skip_cleanup: bool = False
+):
     """
     Move non-duplicate files from CLEANUP_DIRECTORY to TARGET_DIRECTORY.
 
     This function identifies subdirectories that exist in the cleanup directory
     but not in the target directory, and moves them to the target directory.
 
+    By default, this function will run cleanup files before moving to remove
+    unwanted files from the directories being moved.
+
     Args:
         dry_run: If True, only show what would be moved (default: True)
         batch_size: Number of files to move per request (default: 1)
+        skip_cleanup: If True, skip the cleanup files step before moving (default: False)
     """
     start_time = time.time()
 
@@ -829,8 +852,32 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
         cleanup_path = Path(cleanup_dir).resolve()
         target_path = Path(target_dir).resolve()
 
-        # Validate both directories
-        validate_directory(cleanup_path, cleanup_dir, "comparison")
+        # Run cleanup files by default unless skip_cleanup is True
+        cleanup_results = None
+        cleanup_failed = False
+        if not skip_cleanup:
+            logger.info("Running cleanup files before move operation")
+            try:
+                # Call the internal cleanup helper
+                cleanup_results = perform_cleanup_internal(dry_run=dry_run)
+                logger.info(
+                    f"Cleanup completed: {cleanup_results['files_removed']} files removed"
+                )
+            except HTTPException as e:
+                logger.warning(f"Cleanup files step failed: {str(e)}")
+                # Continue with move operation even if cleanup fails
+                cleanup_results = {"error": str(e)}
+                cleanup_failed = True
+            except Exception as e:
+                logger.warning(f"Cleanup files step failed: {str(e)}")
+                # Continue with move operation even if cleanup fails
+                cleanup_results = {"error": str(e)}
+                cleanup_failed = True
+
+        # Validate both directories (after cleanup attempt)
+        # Skip cleanup directory validation if cleanup failed
+        if not cleanup_failed:
+            validate_directory(cleanup_path, cleanup_dir, "comparison")
         validate_directory(target_path, target_dir, "comparison")
 
         # Get subdirectories from both directories (reusing existing functionality)
@@ -946,11 +993,12 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
             target_directory=target_dir,
         ).observe(operation_duration)
 
-        return {
+        response = {
             "cleanup_directory": str(cleanup_path),
             "target_directory": str(target_path),
             "dry_run": dry_run,
             "batch_size": batch_size,
+            "skip_cleanup": skip_cleanup,
             "non_duplicates_found": len(non_duplicates),
             "files_moved": len(moved_files),
             "errors": len(errors),
@@ -959,6 +1007,12 @@ async def move_non_duplicate_files(dry_run: bool = True, batch_size: int = 1):
             "error_details": errors,
             "remaining_files": len(non_duplicates) - processed_count,
         }
+
+        # Add cleanup results to response if cleanup was performed
+        if cleanup_results is not None:
+            response["cleanup_results"] = cleanup_results
+
+        return response
 
     except HTTPException:
         # Re-raise HTTPExceptions (like 404 for missing directories) as-is
