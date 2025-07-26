@@ -5,8 +5,13 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "1968:1968"
+      - "${PORT:-1968}:${PORT:-1968}"
     environment:
+      # Gunicorn configuration
+      - PORT=${PORT:-1968}
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
+      - GUNICORN_LOG_LEVEL=${GUNICORN_LOG_LEVEL:-info}
+      # Application configuration
       - PROMETHEUS_MULTIPROC_DIR=/tmp
       - ENABLE_METRICS=true
       - CLEANUP_DIRECTORY=/data

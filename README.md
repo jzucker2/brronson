@@ -48,7 +48,14 @@ A simple self hosted application for helping with media management for the -arr 
 2. **Run the application**:
 
    ```bash
+   # Development mode with auto-reload
    uvicorn app.main:app --reload --host 0.0.0.0 --port 1968
+
+   # Production mode with gunicorn
+   gunicorn --config gunicorn.conf.py app.main:app
+
+   # Or run gunicorn directly with command line options
+   gunicorn app.main:app --bind 0.0.0.0:1968 --worker-class uvicorn.workers.UvicornWorker --workers 4
    ```
 
 3. **Run tests**:
@@ -361,172 +368,85 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `brronson_move_files_moved_total` - Total files successfully moved (labels: cleanup_directory, target_directory)
 - `brronson_move_errors_total` - Total errors during file move operations (labels: cleanup_directory, target_directory, error_type)
 - `brronson_move_operation_duration_seconds` - Time spent on file move operations (labels: operation_type, cleanup_directory, target_directory)
-- `brronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation (labels: cleanup_directory, target_directory, dry_run)
-- `brronson_move_directories_moved` - Number of directories successfully moved (labels: cleanup_directory, target_directory, dry_run)
-- `brronson_move_batch_operations_total` - Total number of batch operations performed (labels: cleanup_directory, target_directory, batch_size, dry_run)
+- `brronson_move_duplicates_found`
 
-The metrics endpoint is automatically exposed at `/metrics` and supports gzip compression for efficient data transfer.
+## Deployment
 
-### Viewing Metrics
+### Gunicorn Configuration
 
-You can view the Prometheus metrics directly at <http://localhost:1968/metrics> or use any Prometheus-compatible monitoring system to scrape this endpoint.
+The application is configured to run with Gunicorn using Uvicorn workers for production deployments. This provides:
 
-## Testing
+- **Process Management**: Multiple worker processes for better performance
+- **Load Balancing**: Automatic distribution of requests across workers
+- **Graceful Restarts**: Workers can be restarted without dropping connections
+- **Monitoring**: Built-in logging and process monitoring
 
-### Running Tests
+#### Configuration Options
+
+The `gunicorn.conf.py` file includes optimized settings that can be configured via environment variables:
+
+- **Port**: `PORT` - Server port (default: `1968`)
+- **Workers**: `GUNICORN_WORKERS` - Number of worker processes (default: `cpu_count * 2 + 1`)
+- **Log Level**: `GUNICORN_LOG_LEVEL` - Logging level (default: `info`)
+- **Worker Class**: Uses `uvicorn.workers.UvicornWorker` for ASGI support
+- **Timeouts**: 120-second request timeout with 30-second graceful shutdown
+- **Logging**: Structured access and error logging
+- **Security**: Request size limits and field restrictions
+- **Performance**: Shared memory for temporary files
+
+#### Running with Gunicorn
 
 ```bash
-# Install dependencies (choose one):
-pip install -r requirements.txt          # Production + test deps
-pip install -r requirements-dev.txt      # Production + dev + test deps
+# Using configuration file (recommended)
+gunicorn --config gunicorn.conf.py app.main:app
 
-# Run all tests
-pytest
+# Using command line options
+gunicorn app.main:app --bind 0.0.0.0:1968 --worker-class uvicorn.workers.UvicornWorker --workers 4
 
-# Run tests with verbose output
-pytest -v
+# Development mode (single worker with auto-reload)
+gunicorn app.main:app --bind 0.0.0.0:1968 --worker-class uvicorn.workers.UvicornWorker --workers 1 --reload
 
-# Run specific test file
-pytest tests/test_main.py
+# With custom configuration
+PORT=8080 GUNICORN_WORKERS=2 GUNICORN_LOG_LEVEL=debug gunicorn --config gunicorn.conf.py app.main:app
+```
 
-# Run tests with coverage
-pytest --cov=app
+#### Docker Deployment
 
-# Run tests in Docker
+The Docker image automatically uses Gunicorn with the optimized configuration:
+
+```bash
+# Build and run with Docker (default settings)
 docker build -t brronson-api .
-docker run --rm brronson-api pytest
-```
+docker run -p 1968:1968 brronson-api
 
-### Test Structure
+# Run with custom configuration
+docker run -p 8080:8080 \
+  -e PORT=8080 \
+  -e GUNICORN_WORKERS=2 \
+  -e GUNICORN_LOG_LEVEL=debug \
+  brronson-api
 
-- `tests/test_main.py` - Main API endpoint and metrics tests
-- Tests cover:
-  - API endpoint functionality
-  - Prometheus metrics generation
-  - Error handling
-  - Response formats
+# Or use Docker Compose
+docker-compose up -d
 
-## Development
-
-### Code Quality and Linting
-
-This project uses several tools to ensure code quality and consistency:
-
-#### Automatic Linting Setup
-
-1. **Pre-commit Hooks** (Recommended)
-   - Automatically runs linting checks before each commit
-   - Installed with: `make pre-commit-install`
-   - Runs: black formatting, flake8 linting, trailing whitespace removal
-   - If hooks fail, the commit is blocked until issues are fixed
-
-2. **VS Code Integration**
-   - Automatic formatting on save
-   - Real-time linting error display
-   - Import organization on save
-   - Settings configured in `.vscode/settings.json`
-
-3. **Manual Commands**
-
-   ```bash
-   make format      # Format code with black
-   make lint        # Check code with flake8
-   make lint-fix    # Auto-fix linting issues where possible
-   make check       # Run both format and lint
-   make ci-check    # Run all CI checks (pre-commit + tests)
-   ```
-
-#### Linting Rules
-
-- **Line length**: 79 characters maximum
-- **Formatter**: Black (uncompromising)
-- **Linter**: Flake8 with custom configuration
-- **Auto-fixing**: Available for whitespace and basic formatting issues
-
-#### Best Practices
-
-1. **Always run `make check` before committing**
-2. **Use pre-commit hooks** to catch issues automatically
-3. **Fix linting errors immediately** when they appear
-4. **Use `make lint-fix`** for automatic fixes when possible
-
-### Project Structure
-
-```
-brronson/
-├── app/
-│   ├── __init__.py
-│   └── main.py          # FastAPI application
-├── tests/
-│   ├── __init__.py
-│   └── test_main.py     # Unit tests
-├── Dockerfile           # Docker configuration
-├── docker-compose.yml   # Docker Compose configuration
-├── requirements.txt     # Python dependencies
-├── pytest.ini          # Pytest configuration
-└── README.md           # This file
+# Docker Compose with custom configuration
+PORT=8080 GUNICORN_WORKERS=2 GUNICORN_LOG_LEVEL=debug docker-compose up -d
 ```
 
 ### Environment Variables
 
+#### Gunicorn Configuration
+
+- `PORT` - Server port (default: `1968`)
+- `GUNICORN_WORKERS` - Number of worker processes (default: `cpu_count * 2 + 1`)
+- `GUNICORN_LOG_LEVEL` - Logging level (default: `info`)
+
+#### Application Configuration
+
 - `PROMETHEUS_MULTIPROC_DIR` - Directory for Prometheus multiprocess metrics (set to `/tmp` in Docker)
 - `ENABLE_METRICS` - Set to `true` to enable Prometheus metrics collection (default: enabled)
-- `CLEANUP_DIRECTORY` - Directory to scan and clean for unwanted files (default: `/tmp`)
-- `TARGET_DIRECTORY` - Directory to compare with CLEANUP_DIRECTORY for duplicates (default: `/tmp`)
-
-### Building Docker Image
-
-```bash
-docker build -t brronson-api .
-```
-
-### Docker Health Checks
-
-The Docker image includes built-in health checks that:
-
-- Run every 30 seconds
-- Check the `/health` endpoint
-- Consider the container healthy if the health check passes
-- Retry up to 3 times before marking as unhealthy
-
-You can check the health status with:
-
-```bash
-docker ps  # Shows health status
-docker inspect <container_id>  # Shows detailed health check info
-```
-
-### Running Individual Services
-
-```bash
-# Run only the FastAPI app
-docker-compose up app
-
-# Run the application
-docker-compose up app
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Run the test suite
-6. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License.
-
-## Configuration
-
-The application can be configured using environment variables:
-
-- `CLEANUP_DIRECTORY`: Directory to scan for unwanted files (default: `/data`)
-- `TARGET_DIRECTORY`: Directory to move non-duplicate files to (default: `/target`)
-- `ENABLE_METRICS`: Enable Prometheus metrics (default: `true`)
-- `PROMETHEUS_MULTIPROC_DIR`: Directory for Prometheus multiprocess mode (default: `/tmp`)
+- `CLEANUP_DIRECTORY` - Directory to scan for unwanted files (default: `/data`)
+- `TARGET_DIRECTORY` - Directory to move non-duplicate files to (default: `/target`)
 
 ### Logging Configuration
 
@@ -550,3 +470,9 @@ Logs are written to both console and a rotating file in the `logs/` directory. T
 2024-01-15 10:30:20 - app.main - INFO - Starting to move directory: cleanup_only from /data/cleanup_only to /target/cleanup_only
 2024-01-15 10:30:20 - app.main - INFO - Successfully finished moving directory: cleanup_only
 ```
+
+The metrics endpoint is automatically exposed at `/metrics` and supports gzip compression for efficient data transfer.
+
+### Viewing Metrics
+
+You can view the Prometheus metrics directly at <http://localhost:1968/metrics> or use any Prometheus-compatible monitoring system to scrape this endpoint.
