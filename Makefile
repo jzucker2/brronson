@@ -46,7 +46,7 @@ install-dev: ## Install development dependencies
 
 test-docker: ## Run tests in Docker container
 	docker build -t brronson .
-	docker run --rm brronson python3 -m pytest
+	docker run --rm brronson pytest
 
 format: ## Format code with black
 	black app/ tests/ --line-length=79
