@@ -349,11 +349,14 @@ curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=fals
   "subtitle_extensions": [".srt", ".sub", ".vtt", ".ass", ".ssa", ".idx", ".sup", ".scc", ".ttml", ".dfxp", ".mcc", ".stl", ".sbv", ".smi", ".txt"],
   "folders_scanned": 5,
   "folders_with_subtitles_found": 2,
-  "folders_moved": 2,
-  "subtitle_files_moved": 4,
+  "folders_copied": 2,
+  "folders_skipped": 0,
+  "subtitle_files_copied": 4,
+  "subtitle_files_skipped": 0,
   "errors": 0,
   "folders_with_subtitles": ["Movie1", "Movie2"],
-  "moved_folders": ["Movie1", "Movie2"],
+  "copied_folders": ["Movie1", "Movie2"],
+  "skipped_folders": [],
   "error_details": []
 }
 ```
@@ -361,17 +364,19 @@ curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=fals
 **Features:**
 
 - **Subtitle Detection**: Automatically detects folders with subtitle files in the root directory
-- **Selective File Moving**: Only moves subtitle files and folder structure, skips media files (video/images)
-- **Preserves Structure**: Maintains the complete folder structure during the move
+- **Selective File Copying**: Only copies subtitle files and folder structure, skips media files (video/images)
+- **Preserves Structure**: Maintains the complete folder structure during the copy
 - **Multiple Formats**: Supports common subtitle formats (.srt, .sub, .vtt, .ass, .ssa, etc.)
 - **Custom Extensions**: Allows custom subtitle file extensions to be specified
-- **Safe by Default**: Default `dry_run=true` prevents accidental moves
+- **Safe by Default**: Default `dry_run=true` prevents accidental copies
+- **Skip Existing**: Does not overwrite existing destination folders or files (skips them instead)
 - **Error Handling**: Comprehensive error reporting for failed operations
-- **Prometheus Metrics**: Records recovery operations for monitoring
+- **Prometheus Metrics**: Records recovery operations including skipped items for monitoring
 
 **Supported Subtitle Formats:**
 
 The default configuration supports the following subtitle file extensions:
+
 - `.srt` - SubRip
 - `.sub` - SubViewer
 - `.vtt` - WebVTT
@@ -391,8 +396,10 @@ The default configuration supports the following subtitle file extensions:
 **File Filtering:**
 
 The recovery operation intelligently filters files:
-- **Moves**: Subtitle files (based on extension list) and other non-media files (like .nfo, .txt, etc.)
-- **Skips**: Video files (.mp4, .avi, .mkv, etc.) and image files (.jpg, .png, etc.)
+
+- **Copies**: Subtitle files (based on extension list) only
+- **Skips**: Video files (.mp4, .avi, .mkv, etc.), image files (.jpg, .png, etc.), and other non-subtitle files (like .nfo, .txt, etc.)
+- **Skip Existing**: If a destination folder or file already exists, it is skipped (not overwritten) and logged in the response
 
 **Cleanup Integration:**
 
@@ -463,8 +470,10 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 
 - `brronson_recovery_folders_scanned_total` - Total number of folders scanned for subtitle recovery (labels: recycled_directory, dry_run)
 - `brronson_recovery_folders_with_subtitles_found` - Current number of folders found with subtitles in root (labels: recycled_directory, dry_run)
-- `brronson_recovery_folders_moved_total` - Total number of folders successfully moved during recovery (labels: recycled_directory, recovered_directory, dry_run)
-- `brronson_recovery_subtitle_files_moved_total` - Total number of subtitle files moved during recovery (labels: recycled_directory, recovered_directory, dry_run)
+- `brronson_recovery_folders_copied_total` - Total number of folders successfully copied during recovery (labels: recycled_directory, recovered_directory, dry_run)
+- `brronson_recovery_folders_skipped_total` - Total number of folders skipped during recovery (target already exists) (labels: recycled_directory, recovered_directory, dry_run)
+- `brronson_recovery_subtitle_files_copied_total` - Total number of subtitle files copied during recovery (labels: recycled_directory, recovered_directory, dry_run)
+- `brronson_recovery_files_skipped_total` - Total number of subtitle files skipped during recovery (target already exists) (labels: recycled_directory, recovered_directory, dry_run)
 - `brronson_recovery_errors_total` - Total errors during subtitle recovery operations (labels: recycled_directory, recovered_directory, error_type)
 - `brronson_recovery_operation_duration_seconds` - Time spent on subtitle recovery operations (labels: operation_type, recycled_directory, recovered_directory)
 
@@ -533,13 +542,13 @@ PORT=8080 GUNICORN_WORKERS=2 GUNICORN_LOG_LEVEL=debug docker-compose up -d
 
 ### Environment Variables
 
-#### Gunicorn Configuration
+#### Gunicorn Environment Variables
 
 - `PORT` - Server port (default: `1968`)
 - `GUNICORN_WORKERS` - Number of worker processes (default: `cpu_count * 2 + 1`)
 - `GUNICORN_LOG_LEVEL` - Logging level (default: `info`)
 
-#### Application Configuration
+#### Application Environment Variables
 
 - `PROMETHEUS_MULTIPROC_DIR` - Directory for Prometheus multiprocess metrics (set to `/tmp` in Docker)
 - `ENABLE_METRICS` - Set to `true` to enable Prometheus metrics collection (default: enabled)
@@ -560,7 +569,7 @@ Logs are written to both console and a rotating file in the `logs/` directory. T
 
 ### Example Log Output
 
-```
+```text
 2024-01-15 10:30:15 - app.main - INFO - Starting Brronson application version 1.0.0
 2024-01-15 10:30:15 - app.main - INFO - Cleanup directory: /data
 2024-01-15 10:30:15 - app.main - INFO - Target directory: /target

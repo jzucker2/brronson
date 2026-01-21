@@ -301,6 +301,14 @@ make ci-check
 **Problem**: Functions missing docstrings
 **Solution**: Add docstrings following Google or NumPy style
 
+### Markdown Linting Issues
+
+**Problem**: Markdown files have linting errors (duplicate headings, missing code block languages, etc.)
+**Solution**:
+- Fix duplicate headings by making them unique
+- Add language identifiers to code blocks (e.g., ` ```python`, ` ```bash`, ` ```text`)
+- Run `make check` which includes markdown linting via pre-commit hooks
+
 ### Test Failures
 
 **Problem**: Tests fail after changes
@@ -329,6 +337,7 @@ When adding new features:
 3. **Use Labels**: Use meaningful labels for metrics
 4. **Document Metrics**: Update README.md with new metrics
 5. **Test Metrics**: Add tests to verify metrics are recorded
+6. **Skip Metrics**: For copy/move operations, include metrics for skipped items (e.g., `*_skipped_total`) to track when destinations already exist
 
 ## API Endpoint Guidelines
 
@@ -341,6 +350,7 @@ When adding new API endpoints:
 5. **Update README**: Document the endpoint in README.md
 6. **Error Handling**: Implement proper error handling
 7. **Validation**: Validate all inputs
+8. **Skip Existing**: For copy/move operations, skip existing destination files/folders rather than overwriting (log skipped items in response and metrics)
 
 ## Checklist for Agents
 
@@ -350,6 +360,7 @@ Before submitting code, ensure:
 - [ ] `make lint-fix` has been run if linting errors were found
 - [ ] All code is formatted with Black
 - [ ] All code passes Flake8 linting
+- [ ] Markdown files pass linting (no duplicate headings, code blocks have languages)
 - [ ] `make test` passes (all unit tests must pass)
 - [ ] All pre-commit hooks pass (`make pre-commit-run`)
 - [ ] New features have tests

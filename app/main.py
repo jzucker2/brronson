@@ -2,6 +2,7 @@ import logging
 import logging.config
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -286,15 +287,27 @@ recovery_folders_with_subtitles_found = Gauge(
     ["recycled_directory", "dry_run"],
 )
 
-recovery_folders_moved_total = Counter(
-    "brronson_recovery_folders_moved_total",
-    "Total number of folders successfully moved during recovery",
+recovery_folders_copied_total = Counter(
+    "brronson_recovery_folders_copied_total",
+    "Total number of folders successfully copied during recovery",
     ["recycled_directory", "recovered_directory", "dry_run"],
 )
 
-recovery_subtitle_files_moved_total = Counter(
-    "brronson_recovery_subtitle_files_moved_total",
-    "Total number of subtitle files moved during recovery",
+recovery_subtitle_files_copied_total = Counter(
+    "brronson_recovery_subtitle_files_copied_total",
+    "Total number of subtitle files copied during recovery",
+    ["recycled_directory", "recovered_directory", "dry_run"],
+)
+
+recovery_folders_skipped_total = Counter(
+    "brronson_recovery_folders_skipped_total",
+    "Total number of folders skipped during recovery (target already exists)",
+    ["recycled_directory", "recovered_directory", "dry_run"],
+)
+
+recovery_files_skipped_total = Counter(
+    "brronson_recovery_files_skipped_total",
+    "Total number of subtitle files skipped during recovery (target already exists)",
     ["recycled_directory", "recovered_directory", "dry_run"],
 )
 
@@ -1135,8 +1148,6 @@ async def move_non_duplicate_files(
                         f"Starting to move directory: {subdir_name} from {source_path} to {target_path_subdir}"
                     )
                     # Use shutil.move for cross-device moves if needed
-                    import shutil
-
                     shutil.move(str(source_path), str(target_path_subdir))
                     moved_files.append(subdir_name)
                     logger.info(
@@ -1241,6 +1252,7 @@ async def recover_subtitle_folders(
     - Copies only subtitle files (not media files, images, or any other files)
     - Preserves the folder structure during the copy
     - Leaves the original files in the recycled directory unchanged
+    - Skips folders and files if the destination already exists (does not overwrite)
 
     Args:
         dry_run: If True, only show what would be copied (default: True)
@@ -1311,7 +1323,9 @@ async def recover_subtitle_folders(
         ).set(len(folders_with_subtitles))
 
         copied_folders = []
+        skipped_folders = []
         subtitle_files_copied = 0
+        subtitle_files_skipped = 0
         errors = []
 
         # Process each folder with subtitles
@@ -1319,19 +1333,9 @@ async def recover_subtitle_folders(
             folder_name = folder_path.name
             target_folder_path = recovered_path / folder_name
 
-            # Check if target folder already exists (both dry run and actual)
-            if target_folder_path.exists():
-                error_msg = (
-                    f"Target folder {target_folder_path} already exists"
-                )
-                logger.warning(error_msg)
-                errors.append(error_msg)
-                recovery_errors_total.labels(
-                    recycled_directory=recycled_dir,
-                    recovered_directory=recovered_dir,
-                    error_type="target_exists",
-                ).inc()
-                continue
+            # Track files copied/skipped for this folder
+            folder_files_copied = 0
+            folder_files_skipped = 0
 
             if not dry_run:
                 target_created = False
@@ -1363,30 +1367,60 @@ async def recover_subtitle_folders(
                             if is_subtitle_file(
                                 source_file, subtitle_extensions
                             ):
-                                import shutil
-
-                                shutil.copy2(
-                                    str(source_file), str(target_file)
-                                )
-                                subtitle_files_copied += 1
-                                logger.debug(
-                                    f"Copied subtitle file: {source_file.name} to {target_file}"
-                                )
+                                # Check if target file already exists
+                                if target_file.exists():
+                                    logger.info(
+                                        f"Skipping {source_file.name} - target file already exists: {target_file}"
+                                    )
+                                    folder_files_skipped += 1
+                                    subtitle_files_skipped += 1
+                                    recovery_files_skipped_total.labels(
+                                        recycled_directory=recycled_dir,
+                                        recovered_directory=recovered_dir,
+                                        dry_run=str(dry_run).lower(),
+                                    ).inc()
+                                else:
+                                    shutil.copy2(
+                                        str(source_file), str(target_file)
+                                    )
+                                    folder_files_copied += 1
+                                    subtitle_files_copied += 1
+                                    logger.debug(
+                                        f"Copied subtitle file: {source_file.name} to {target_file}"
+                                    )
                             else:
                                 # Skip all non-subtitle files (media files, .nfo, .txt, etc.)
                                 logger.debug(
                                     f"Skipping non-subtitle file: {source_file.name}"
                                 )
 
-                    copied_folders.append(folder_name)
-                    logger.info(
-                        f"Successfully finished copying folder: {folder_name}"
-                    )
-                    recovery_folders_moved_total.labels(
-                        recycled_directory=recycled_dir,
-                        recovered_directory=recovered_dir,
-                        dry_run=str(dry_run).lower(),
-                    ).inc()
+                    # Determine if folder should be counted as copied or skipped
+                    if folder_files_copied > 0:
+                        copied_folders.append(folder_name)
+                        logger.info(
+                            f"Successfully finished copying folder: {folder_name} ({folder_files_copied} files copied, {folder_files_skipped} files skipped)"
+                        )
+                        recovery_folders_copied_total.labels(
+                            recycled_directory=recycled_dir,
+                            recovered_directory=recovered_dir,
+                            dry_run=str(dry_run).lower(),
+                        ).inc()
+                    elif folder_files_skipped > 0:
+                        # All files were skipped (folder existed with all files)
+                        skipped_folders.append(folder_name)
+                        logger.info(
+                            f"Folder {folder_name} skipped - all files already exist ({folder_files_skipped} files skipped)"
+                        )
+                        recovery_folders_skipped_total.labels(
+                            recycled_directory=recycled_dir,
+                            recovered_directory=recovered_dir,
+                            dry_run=str(dry_run).lower(),
+                        ).inc()
+                    else:
+                        # No subtitle files found in folder
+                        logger.warning(
+                            f"Folder {folder_name} had no subtitle files to copy"
+                        )
 
                 except Exception as e:
                     error_msg = (
@@ -1402,8 +1436,6 @@ async def recover_subtitle_folders(
 
                     # Clean up partially created target folder on failure
                     if target_created and target_folder_path.exists():
-                        import shutil
-
                         try:
                             logger.warning(
                                 f"Cleaning up partially created folder: {target_folder_path}"
@@ -1417,22 +1449,45 @@ async def recover_subtitle_folders(
                                 f"Failed to clean up partial folder {target_folder_path}: {str(cleanup_error)}"
                             )
             else:
-                # Dry run mode - count what would be copied (already checked target doesn't exist)
+                # Dry run mode - count what would be copied
                 logger.info(
                     f"DRY RUN: Would copy folder: {folder_name} from {folder_path} to {target_folder_path}"
                 )
-                copied_folders.append(folder_name)
 
-                # Count subtitle files that would be copied
+                # Count subtitle files that would be copied (checking if they exist)
                 for root, dirs, files in os.walk(folder_path):
+                    rel_path = Path(root).relative_to(folder_path)
+                    target_dir = target_folder_path / rel_path
                     for file in files:
                         source_file = Path(root) / file
                         if is_subtitle_file(source_file, subtitle_extensions):
-                            subtitle_files_copied += 1
+                            target_file = target_dir / file
+                            if target_file.exists():
+                                folder_files_skipped += 1
+                                subtitle_files_skipped += 1
+                                recovery_files_skipped_total.labels(
+                                    recycled_directory=recycled_dir,
+                                    recovered_directory=recovered_dir,
+                                    dry_run=str(dry_run).lower(),
+                                ).inc()
+                            else:
+                                folder_files_copied += 1
+                                subtitle_files_copied += 1
 
-        # Record metric for subtitle files copied
+                # Determine if folder would be copied or skipped
+                if folder_files_copied > 0:
+                    copied_folders.append(folder_name)
+                elif folder_files_skipped > 0:
+                    skipped_folders.append(folder_name)
+                    recovery_folders_skipped_total.labels(
+                        recycled_directory=recycled_dir,
+                        recovered_directory=recovered_dir,
+                        dry_run=str(dry_run).lower(),
+                    ).inc()
+
+        # Record metrics for subtitle files copied and skipped
         if subtitle_files_copied > 0:
-            recovery_subtitle_files_moved_total.labels(
+            recovery_subtitle_files_copied_total.labels(
                 recycled_directory=recycled_dir,
                 recovered_directory=recovered_dir,
                 dry_run=str(dry_run).lower(),
@@ -1454,10 +1509,13 @@ async def recover_subtitle_folders(
             "folders_scanned": len(folders_to_check),
             "folders_with_subtitles_found": len(folders_with_subtitles),
             "folders_copied": len(copied_folders),
+            "folders_skipped": len(skipped_folders),
             "subtitle_files_copied": subtitle_files_copied,
+            "subtitle_files_skipped": subtitle_files_skipped,
             "errors": len(errors),
             "folders_with_subtitles": [f.name for f in folders_with_subtitles],
             "copied_folders": copied_folders,
+            "skipped_folders": skipped_folders,
             "error_details": errors,
         }
 

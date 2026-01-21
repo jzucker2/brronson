@@ -1797,7 +1797,9 @@ class TestSubtitleRecovery(unittest.TestCase):
             data["folders_with_subtitles_found"], 1
         )  # Only Movie1
         self.assertEqual(data["folders_copied"], 1)
+        self.assertEqual(data["folders_skipped"], 0)
         self.assertEqual(data["subtitle_files_copied"], 1)  # Only subtitle.srt
+        self.assertEqual(data["subtitle_files_skipped"], 0)
         self.assertEqual(data["errors"], 0)
 
         # Verify files still exist in original location (dry run)
@@ -1839,9 +1841,11 @@ class TestSubtitleRecovery(unittest.TestCase):
         self.assertFalse(data["dry_run"])
         self.assertEqual(data["folders_with_subtitles_found"], 1)
         self.assertEqual(data["folders_copied"], 1)
+        self.assertEqual(data["folders_skipped"], 0)
         self.assertEqual(
             data["subtitle_files_copied"], 2
         )  # subtitle.srt and subtitle2.srt
+        self.assertEqual(data["subtitle_files_skipped"], 0)
         self.assertEqual(data["errors"], 0)
 
         # Verify folder was copied to recovered directory
@@ -2029,7 +2033,7 @@ class TestSubtitleRecovery(unittest.TestCase):
         folder.mkdir()
         (folder / "subtitle.srt").touch()
 
-        # Create folder with same name in recovered
+        # Create folder with same name in recovered (empty folder)
         (self.recovered_dir / "Movie1").mkdir()
 
         response = client.post(
@@ -2038,9 +2042,76 @@ class TestSubtitleRecovery(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
-        # Should have an error
-        self.assertGreater(data["errors"], 0)
-        self.assertIn("already exists", str(data["error_details"]))
+        # Should copy files into existing folder, not skip
+        self.assertEqual(data["errors"], 0)
+        self.assertEqual(data["folders_copied"], 1)
+        self.assertEqual(data["folders_skipped"], 0)
+        self.assertIn("Movie1", data["copied_folders"])
+        self.assertEqual(data["subtitle_files_copied"], 1)
+        self.assertEqual(data["subtitle_files_skipped"], 0)
+
+        # Verify file was copied into existing folder
+        self.assertTrue(
+            (self.recovered_dir / "Movie1" / "subtitle.srt").exists()
+        )
+
+    def test_recover_subtitle_folders_file_exists(self):
+        """Test subtitle recovery when destination file already exists"""
+        # Create folder with subtitle in recycled
+        folder = self.recycled_dir / "Movie1"
+        folder.mkdir()
+        (folder / "subtitle.srt").touch()
+        (folder / "subtitle2.srt").touch()
+
+        # Create folder and one subtitle file in recovered
+        (self.recovered_dir / "Movie1").mkdir()
+        (self.recovered_dir / "Movie1" / "subtitle.srt").write_text("existing")
+
+        response = client.post(
+            "/api/v1/recover/subtitle-folders?dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Should copy folder but skip existing file
+        self.assertEqual(data["folders_copied"], 1)
+        self.assertEqual(
+            data["subtitle_files_copied"], 1
+        )  # Only subtitle2.srt
+        self.assertEqual(
+            data["subtitle_files_skipped"], 1
+        )  # subtitle.srt skipped
+
+        # Verify existing file was not overwritten
+        self.assertEqual(
+            (self.recovered_dir / "Movie1" / "subtitle.srt").read_text(),
+            "existing",
+        )
+        # Verify new file was copied
+        self.assertTrue(
+            (self.recovered_dir / "Movie1" / "subtitle2.srt").exists()
+        )
+
+    def test_recover_subtitle_folders_dry_run_skips_existing(self):
+        """Test that dry run correctly identifies folders/files that would be skipped"""
+        # Create folder with subtitle in recycled
+        folder = self.recycled_dir / "Movie1"
+        folder.mkdir()
+        (folder / "subtitle.srt").touch()
+
+        # Create folder and file in recovered
+        (self.recovered_dir / "Movie1").mkdir()
+        (self.recovered_dir / "Movie1" / "subtitle.srt").touch()
+
+        response = client.post("/api/v1/recover/subtitle-folders")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Dry run should show skip
+        self.assertTrue(data["dry_run"])
+        self.assertEqual(data["folders_skipped"], 1)
+        self.assertEqual(data["subtitle_files_skipped"], 1)
+        self.assertIn("Movie1", data["skipped_folders"])
 
     def test_recover_subtitle_folders_preserves_structure(self):
         """Test that subtitle recovery preserves folder structure"""
@@ -2115,6 +2186,94 @@ class TestSubtitleRecovery(unittest.TestCase):
         # Verify subtitle IS in recovered directory
         self.assertTrue(
             (self.recovered_dir / "Movie1" / "subtitle.srt").exists()
+        )
+
+    def test_recover_subtitle_folders_skips_existing_files(self):
+        """Test that subtitle recovery skips existing destination files"""
+        # Create folder with multiple subtitles in recycled
+        folder = self.recycled_dir / "Movie1"
+        folder.mkdir()
+        (folder / "subtitle1.srt").touch()
+        (folder / "subtitle2.srt").touch()
+        (folder / "subtitle3.srt").touch()
+
+        # Create folder and one existing subtitle in recovered
+        (self.recovered_dir / "Movie1").mkdir()
+        existing_file = self.recovered_dir / "Movie1" / "subtitle2.srt"
+        existing_file.write_text("existing content")
+
+        response = client.post(
+            "/api/v1/recover/subtitle-folders?dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Should copy 2 files, skip 1
+        self.assertEqual(data["folders_copied"], 1)
+        self.assertEqual(
+            data["subtitle_files_copied"], 2
+        )  # subtitle1 and subtitle3
+        self.assertEqual(data["subtitle_files_skipped"], 1)  # subtitle2
+
+        # Verify existing file was not overwritten
+        self.assertEqual(existing_file.read_text(), "existing content")
+        # Verify new files were copied
+        self.assertTrue(
+            (self.recovered_dir / "Movie1" / "subtitle1.srt").exists()
+        )
+        self.assertTrue(
+            (self.recovered_dir / "Movie1" / "subtitle3.srt").exists()
+        )
+
+    def test_recover_subtitle_folders_skip_metrics(self):
+        """Test that skip metrics are recorded correctly"""
+        # Create folder with subtitle in recycled
+        folder = self.recycled_dir / "Movie1"
+        folder.mkdir()
+        (folder / "subtitle.srt").touch()
+
+        # Create folder with existing file in recovered to trigger skip
+        (self.recovered_dir / "Movie1").mkdir()
+        (self.recovered_dir / "Movie1" / "subtitle.srt").write_text("existing")
+
+        response = client.post("/api/v1/recover/subtitle-folders")
+        self.assertEqual(response.status_code, 200)
+
+        # Check metrics
+        metrics_response = client.get("/metrics")
+        metrics_text = metrics_response.text
+
+        # Should have skip metrics
+        self.assertIn("brronson_recovery_folders_skipped_total", metrics_text)
+        self.assertIn("brronson_recovery_files_skipped_total", metrics_text)
+
+        recycled_path_resolved = normalize_path_for_metrics(self.recycled_dir)
+        recovered_path_resolved = normalize_path_for_metrics(
+            self.recovered_dir
+        )
+
+        # Check skipped folders metric (folder should be skipped because all files exist)
+        assert_metric_with_labels(
+            metrics_text,
+            "brronson_recovery_folders_skipped_total",
+            {
+                "recycled_directory": recycled_path_resolved,
+                "recovered_directory": recovered_path_resolved,
+                "dry_run": "true",
+            },
+            "1.0",
+        )
+
+        # Check skipped files metric
+        assert_metric_with_labels(
+            metrics_text,
+            "brronson_recovery_files_skipped_total",
+            {
+                "recycled_directory": recycled_path_resolved,
+                "recovered_directory": recovered_path_resolved,
+                "dry_run": "true",
+            },
+            "1.0",
         )
 
 
