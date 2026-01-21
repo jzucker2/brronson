@@ -78,6 +78,15 @@ def get_target_directory():
     """Get the target directory from environment variable"""
     return os.getenv("TARGET_DIRECTORY", "/target")
 
+def get_recycled_movies_directory():
+    """Get the recycled movies directory from environment variable"""
+    return os.getenv("RECYCLED_MOVIES_DIRECTORY", "/recycled/movies")
+
+
+def get_recovered_movies_directory():
+    """Get the recovered movies directory from environment variable"""
+    return os.getenv("RECOVERED_MOVIES_DIRECTORY", "/recovered/movies")
+
 
 # Default patterns for common unwanted files
 DEFAULT_UNWANTED_PATTERNS = [
