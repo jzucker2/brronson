@@ -1489,57 +1489,75 @@ async def recover_subtitle_folders(
                             )
             else:
                 # Dry run mode - count what would be copied
-                logger.info(
-                    f"DRY RUN: Would copy folder: {folder_name} from {folder_path} to {target_folder_path}"
-                )
+                try:
+                    logger.info(
+                        f"DRY RUN: Would copy folder: {folder_name} from {folder_path} to {target_folder_path}"
+                    )
 
-                # Count subtitle files that would be copied (checking if they exist)
-                batch_limit_reached = False
-                for root, dirs, files in os.walk(folder_path):
-                    if files_copied_this_batch >= batch_size:
-                        batch_limit_reached = True
-                        batch_limit_hit = True
-                        break
-                    rel_path = Path(root).relative_to(folder_path)
-                    target_dir = target_folder_path / rel_path
-                    # Sort files to ensure consistent processing order
-                    for file in sorted(files):
+                    # Count subtitle files that would be copied (checking if they exist)
+                    batch_limit_reached = False
+                    for root, dirs, files in os.walk(folder_path):
                         if files_copied_this_batch >= batch_size:
                             batch_limit_reached = True
                             batch_limit_hit = True
                             break
-                        source_file = Path(root) / file
-                        if is_subtitle_file(source_file, subtitle_extensions):
-                            target_file = target_dir / file
-                            if target_file.exists():
-                                folder_files_skipped += 1
-                                subtitle_files_skipped += 1
-                                recovery_files_skipped_total.labels(
-                                    recycled_directory=recycled_dir,
-                                    recovered_directory=recovered_dir,
-                                    dry_run=str(dry_run).lower(),
-                                ).inc()
-                            else:
-                                folder_files_copied += 1
-                                subtitle_files_copied += 1
-                                files_copied_this_batch += 1
-                    if batch_limit_reached:
-                        break
+                        rel_path = Path(root).relative_to(folder_path)
+                        target_dir = target_folder_path / rel_path
+                        # Sort files to ensure consistent processing order
+                        for file in sorted(files):
+                            if files_copied_this_batch >= batch_size:
+                                batch_limit_reached = True
+                                batch_limit_hit = True
+                                break
+                            source_file = Path(root) / file
+                            if is_subtitle_file(
+                                source_file, subtitle_extensions
+                            ):
+                                target_file = target_dir / file
+                                if target_file.exists():
+                                    folder_files_skipped += 1
+                                    subtitle_files_skipped += 1
+                                    recovery_files_skipped_total.labels(
+                                        recycled_directory=recycled_dir,
+                                        recovered_directory=recovered_dir,
+                                        dry_run=str(dry_run).lower(),
+                                    ).inc()
+                                else:
+                                    folder_files_copied += 1
+                                    subtitle_files_copied += 1
+                                    files_copied_this_batch += 1
+                        if batch_limit_reached:
+                            break
 
-                # Determine if folder would be copied or skipped
-                if folder_files_copied > 0:
-                    copied_folders.append(folder_name)
-                    recovery_folders_copied_total.labels(
+                    # Determine if folder would be copied or skipped
+                    if folder_files_copied > 0:
+                        copied_folders.append(folder_name)
+                        recovery_folders_copied_total.labels(
+                            recycled_directory=recycled_dir,
+                            recovered_directory=recovered_dir,
+                            dry_run=str(dry_run).lower(),
+                        ).inc()
+                    elif folder_files_skipped > 0:
+                        skipped_folders.append(folder_name)
+                        recovery_folders_skipped_total.labels(
+                            recycled_directory=recycled_dir,
+                            recovered_directory=recovered_dir,
+                            dry_run=str(dry_run).lower(),
+                        ).inc()
+                    else:
+                        # No subtitle files found in folder
+                        logger.warning(
+                            f"DRY RUN: Folder {folder_name} had no subtitle files to copy"
+                        )
+
+                except Exception as e:
+                    error_msg = f"DRY RUN: Failed to process folder {folder_name}: {str(e)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+                    recovery_errors_total.labels(
                         recycled_directory=recycled_dir,
                         recovered_directory=recovered_dir,
-                        dry_run=str(dry_run).lower(),
-                    ).inc()
-                elif folder_files_skipped > 0:
-                    skipped_folders.append(folder_name)
-                    recovery_folders_skipped_total.labels(
-                        recycled_directory=recycled_dir,
-                        recovered_directory=recovered_dir,
-                        dry_run=str(dry_run).lower(),
+                        error_type="folder_copy_error",
                     ).inc()
 
         # Record metrics for subtitle files copied and skipped
