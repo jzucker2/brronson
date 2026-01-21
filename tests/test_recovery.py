@@ -649,3 +649,33 @@ class TestSubtitleRecovery(unittest.TestCase):
             + [f"subtitle{i}.srt" for i in range(2, 10)]
         )
         self.assertEqual(all_files, expected_all)
+
+    def test_recover_subtitle_folders_batch_size_validation(self):
+        """Test that batch_size validation rejects zero and negative values"""
+        # Test with batch_size=0
+        response = client.post(
+            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=0"
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertIn("batch_size must be a positive integer", data["detail"])
+
+        # Test with negative batch_size
+        response = client.post(
+            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=-1"
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertIn("batch_size must be a positive integer", data["detail"])
+
+        # Test with valid batch_size (should work)
+        folder = self.recycled_dir / "Movie1"
+        folder.mkdir()
+        (folder / "subtitle.srt").touch()
+
+        response = client.post(
+            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=1"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["batch_size"], 1)

@@ -1269,6 +1269,13 @@ async def recover_subtitle_folders(
     """
     start_time = time.time()
 
+    # Validate batch_size parameter
+    if batch_size <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"batch_size must be a positive integer, got {batch_size}",
+        )
+
     recycled_dir = get_recycled_movies_directory()
     recovered_dir = get_recovered_movies_directory()
 
