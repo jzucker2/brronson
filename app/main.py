@@ -563,53 +563,6 @@ def is_subtitle_file(file_path: Path, subtitle_extensions: List[str]) -> bool:
     ]
 
 
-def is_media_file(file_path: Path) -> bool:
-    """
-    Check if a file is a media file (video or image).
-
-    Args:
-        file_path: Path to the file to check
-
-    Returns:
-        True if file is a media file, False otherwise
-    """
-    media_extensions = [
-        # Video formats
-        ".mp4",
-        ".avi",
-        ".mkv",
-        ".mov",
-        ".wmv",
-        ".flv",
-        ".webm",
-        ".m4v",
-        ".mpg",
-        ".mpeg",
-        ".3gp",
-        ".ogv",
-        ".divx",
-        ".xvid",
-        ".vob",
-        ".ts",
-        ".m2ts",
-        ".mts",
-        # Image formats
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".gif",
-        ".bmp",
-        ".tiff",
-        ".tif",
-        ".webp",
-        ".svg",
-        ".ico",
-        ".heic",
-        ".heif",
-    ]
-    return file_path.suffix.lower() in media_extensions
-
-
 # Create FastAPI app
 app = FastAPI(title="Brronson", version=version)
 
@@ -1286,12 +1239,18 @@ async def salvage_subtitle_folders(
         recycled_path = Path(recycled_dir).resolve()
         salvaged_path = Path(salvaged_dir).resolve()
 
-        # Validate both directories
+        # Validate recycled directory first
         validate_directory(recycled_path, recycled_dir, "salvage")
-        validate_directory(salvaged_path, salvaged_dir, "salvage")
 
-        # Ensure salvaged directory exists
-        salvaged_path.mkdir(parents=True, exist_ok=True)
+        # Ensure salvaged directory exists (create if it doesn't)
+        try:
+            salvaged_path.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError):
+            # If directory creation fails, validate_directory will handle the 404
+            pass
+
+        # Validate salvaged directory (after attempting to create it)
+        validate_directory(salvaged_path, salvaged_dir, "salvage")
 
         logger.info(
             f"Subtitle salvage: Scanning {recycled_path} for folders with subtitles"

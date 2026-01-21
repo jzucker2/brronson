@@ -176,9 +176,7 @@ class TestSubtitleSalvage(unittest.TestCase):
         self.assertFalse((self.salvaged_dir / "Movie1" / "info.nfo").exists())
 
         # Verify media files were NOT copied (should not be in salvaged)
-        self.assertFalse(
-            (self.salvaged_dir / "Movie1" / "movie.mp4").exists()
-        )
+        self.assertFalse((self.salvaged_dir / "Movie1" / "movie.mp4").exists())
         self.assertFalse(
             (self.salvaged_dir / "Movie1" / "poster.jpg").exists()
         )
@@ -500,8 +498,7 @@ class TestSubtitleSalvage(unittest.TestCase):
         # At least one folder should have been processed
         self.assertTrue(
             any(
-                (self.salvaged_dir / f"Movie{i}").exists()
-                for i in range(1, 4)
+                (self.salvaged_dir / f"Movie{i}").exists() for i in range(1, 4)
             )
         )
 
