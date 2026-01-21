@@ -84,6 +84,7 @@ A simple self hosted application for helping with media management for the -arr 
 - `GET /api/v1/items/{item_id}` - Get a specific item by ID
 - `GET /api/v1/compare/directories` - Compare subdirectories between directories
 - `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories between directories
+- `POST /api/v1/recover/subtitle-folders` - Recover folders with subtitles from recycled movies directory
 
 ### File Cleanup Endpoints
 
@@ -305,6 +306,94 @@ curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?skip_cleanup=true
 - **Progress Tracking**: `remaining_files` field shows how many files still need to be moved
 - **Prometheus Metrics**: Records both move operations and cleanup operations
 
+### Subtitle Recovery Endpoints
+
+- `POST /api/v1/recover/subtitle-folders` - Recover folders with subtitles from recycled movies directory
+
+#### Subtitle Recovery Usage
+
+The subtitle recovery endpoint helps move folders that contain subtitle files from the recycled movies directory to the recovered movies directory. This is useful for recovering movie folders that were moved to the recycled directory but still have subtitle files that should be preserved.
+
+**Configuration:**
+
+- `RECYCLED_MOVIES_DIRECTORY` - Source directory containing folders to scan (default: `/recycled/movies`)
+- `RECOVERED_MOVIES_DIRECTORY` - Destination directory for folders with subtitles (default: `/recovered/movies`)
+
+**Recover folders with subtitles (dry run - default):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders"
+```
+
+**Recover folders with subtitles (actual move):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=false"
+```
+
+**Use custom subtitle extensions:**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=false" \
+  -H "Content-Type: application/json" \
+  -d '[".srt", ".sub", ".vtt", ".custom"]'
+```
+
+**Response format:**
+
+```json
+{
+  "recycled_directory": "/path/to/recycled/movies",
+  "recovered_directory": "/path/to/recovered/movies",
+  "dry_run": true,
+  "subtitle_extensions": [".srt", ".sub", ".vtt", ".ass", ".ssa", ".idx", ".sup", ".scc", ".ttml", ".dfxp", ".mcc", ".stl", ".sbv", ".smi", ".txt"],
+  "folders_scanned": 5,
+  "folders_with_subtitles_found": 2,
+  "folders_moved": 2,
+  "subtitle_files_moved": 4,
+  "errors": 0,
+  "folders_with_subtitles": ["Movie1", "Movie2"],
+  "moved_folders": ["Movie1", "Movie2"],
+  "error_details": []
+}
+```
+
+**Features:**
+
+- **Subtitle Detection**: Automatically detects folders with subtitle files in the root directory
+- **Selective File Moving**: Only moves subtitle files and folder structure, skips media files (video/images)
+- **Preserves Structure**: Maintains the complete folder structure during the move
+- **Multiple Formats**: Supports common subtitle formats (.srt, .sub, .vtt, .ass, .ssa, etc.)
+- **Custom Extensions**: Allows custom subtitle file extensions to be specified
+- **Safe by Default**: Default `dry_run=true` prevents accidental moves
+- **Error Handling**: Comprehensive error reporting for failed operations
+- **Prometheus Metrics**: Records recovery operations for monitoring
+
+**Supported Subtitle Formats:**
+
+The default configuration supports the following subtitle file extensions:
+- `.srt` - SubRip
+- `.sub` - SubViewer
+- `.vtt` - WebVTT
+- `.ass` - Advanced SubStation Alpha
+- `.ssa` - SubStation Alpha
+- `.idx` - VobSub index
+- `.sup` - Blu-ray subtitle
+- `.scc` - Scenarist Closed Caption
+- `.ttml` - Timed Text Markup Language
+- `.dfxp` - Distribution Format Exchange Profile
+- `.mcc` - MacCaption
+- `.stl` - Spruce subtitle
+- `.sbv` - YouTube subtitle
+- `.smi` - SAMI
+- `.txt` - Plain text (some subtitle files use this extension)
+
+**File Filtering:**
+
+The recovery operation intelligently filters files:
+- **Moves**: Subtitle files (based on extension list) and other non-media files (like .nfo, .txt, etc.)
+- **Skips**: Video files (.mp4, .avi, .mkv, etc.) and image files (.jpg, .png, etc.)
+
 **Cleanup Integration:**
 
 The move operation now includes automatic cleanup by default:
@@ -368,7 +457,16 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `brronson_move_files_moved_total` - Total files successfully moved (labels: cleanup_directory, target_directory)
 - `brronson_move_errors_total` - Total errors during file move operations (labels: cleanup_directory, target_directory, error_type)
 - `brronson_move_operation_duration_seconds` - Time spent on file move operations (labels: operation_type, cleanup_directory, target_directory)
-- `brronson_move_duplicates_found`
+- `brronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation
+
+#### Subtitle Recovery Metrics
+
+- `brronson_recovery_folders_scanned_total` - Total number of folders scanned for subtitle recovery (labels: recycled_directory, dry_run)
+- `brronson_recovery_folders_with_subtitles_found` - Current number of folders found with subtitles in root (labels: recycled_directory, dry_run)
+- `brronson_recovery_folders_moved_total` - Total number of folders successfully moved during recovery (labels: recycled_directory, recovered_directory, dry_run)
+- `brronson_recovery_subtitle_files_moved_total` - Total number of subtitle files moved during recovery (labels: recycled_directory, recovered_directory, dry_run)
+- `brronson_recovery_errors_total` - Total errors during subtitle recovery operations (labels: recycled_directory, recovered_directory, error_type)
+- `brronson_recovery_operation_duration_seconds` - Time spent on subtitle recovery operations (labels: operation_type, recycled_directory, recovered_directory)
 
 ## Deployment
 
@@ -447,6 +545,8 @@ PORT=8080 GUNICORN_WORKERS=2 GUNICORN_LOG_LEVEL=debug docker-compose up -d
 - `ENABLE_METRICS` - Set to `true` to enable Prometheus metrics collection (default: enabled)
 - `CLEANUP_DIRECTORY` - Directory to scan for unwanted files (default: `/data`)
 - `TARGET_DIRECTORY` - Directory to move non-duplicate files to (default: `/target`)
+- `RECYCLED_MOVIES_DIRECTORY` - Directory containing recycled movie folders (default: `/recycled/movies`)
+- `RECOVERED_MOVIES_DIRECTORY` - Directory for recovered movie folders with subtitles (default: `/recovered/movies`)
 
 ### Logging Configuration
 

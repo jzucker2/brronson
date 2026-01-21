@@ -109,6 +109,25 @@ DEFAULT_UNWANTED_PATTERNS = [
     r"\.backup$",
 ]
 
+# Default subtitle file extensions (case-insensitive)
+DEFAULT_SUBTITLE_EXTENSIONS = [
+    ".srt",
+    ".sub",
+    ".vtt",
+    ".ass",
+    ".ssa",
+    ".idx",
+    ".sup",
+    ".scc",
+    ".ttml",
+    ".dfxp",
+    ".mcc",
+    ".stl",
+    ".sbv",
+    ".smi",
+    ".txt",  # Some subtitle files use .txt extension
+]
+
 
 # Custom Prometheus metrics for file cleanup operations
 cleanup_files_found_total = Counter(
@@ -251,6 +270,43 @@ move_batch_operations_total = Counter(
     "brronson_move_batch_operations_total",
     "Total number of batch operations performed",
     ["cleanup_directory", "target_directory", "batch_size", "dry_run"],
+)
+
+# Custom Prometheus metrics for subtitle recovery operations
+recovery_folders_scanned_total = Counter(
+    "brronson_recovery_folders_scanned_total",
+    "Total number of folders scanned for subtitle recovery",
+    ["recycled_directory", "dry_run"],
+)
+
+recovery_folders_with_subtitles_found = Gauge(
+    "brronson_recovery_folders_with_subtitles_found",
+    "Current number of folders found with subtitles in root",
+    ["recycled_directory", "dry_run"],
+)
+
+recovery_folders_moved_total = Counter(
+    "brronson_recovery_folders_moved_total",
+    "Total number of folders successfully moved during recovery",
+    ["recycled_directory", "recovered_directory", "dry_run"],
+)
+
+recovery_subtitle_files_moved_total = Counter(
+    "brronson_recovery_subtitle_files_moved_total",
+    "Total number of subtitle files moved during recovery",
+    ["recycled_directory", "recovered_directory", "dry_run"],
+)
+
+recovery_errors_total = Counter(
+    "brronson_recovery_errors_total",
+    "Total number of errors during subtitle recovery operations",
+    ["recycled_directory", "recovered_directory", "error_type"],
+)
+
+recovery_operation_duration = Histogram(
+    "brronson_recovery_operation_duration_seconds",
+    "Time spent on subtitle recovery operations",
+    ["operation_type", "recycled_directory", "recovered_directory"],
 )
 
 brronson_info = Gauge("brronson_info", "Info about the server", ["version"])
@@ -407,6 +463,91 @@ def get_subdirectories(
         ).inc(len(subdirectories))
 
     return subdirectories
+
+
+def has_subtitle_in_root(
+    folder_path: Path, subtitle_extensions: List[str]
+) -> bool:
+    """
+    Check if a folder has any subtitle files in its root directory.
+
+    Args:
+        folder_path: Path to the folder to check
+        subtitle_extensions: List of subtitle file extensions (with leading dot)
+
+    Returns:
+        True if folder contains at least one subtitle file in root, False otherwise
+    """
+    try:
+        for item in folder_path.iterdir():
+            if item.is_file():
+                file_ext = item.suffix.lower()
+                if file_ext in [ext.lower() for ext in subtitle_extensions]:
+                    return True
+    except Exception:
+        pass  # Return False if directory can't be read
+    return False
+
+
+def is_subtitle_file(file_path: Path, subtitle_extensions: List[str]) -> bool:
+    """
+    Check if a file is a subtitle file based on its extension.
+
+    Args:
+        file_path: Path to the file to check
+        subtitle_extensions: List of subtitle file extensions (with leading dot)
+
+    Returns:
+        True if file is a subtitle file, False otherwise
+    """
+    return file_path.suffix.lower() in [ext.lower() for ext in subtitle_extensions]
+
+
+def is_media_file(file_path: Path) -> bool:
+    """
+    Check if a file is a media file (video or image).
+
+    Args:
+        file_path: Path to the file to check
+
+    Returns:
+        True if file is a media file, False otherwise
+    """
+    media_extensions = [
+        # Video formats
+        ".mp4",
+        ".avi",
+        ".mkv",
+        ".mov",
+        ".wmv",
+        ".flv",
+        ".webm",
+        ".m4v",
+        ".mpg",
+        ".mpeg",
+        ".3gp",
+        ".ogv",
+        ".divx",
+        ".xvid",
+        ".vob",
+        ".ts",
+        ".m2ts",
+        ".mts",
+        # Image formats
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".tiff",
+        ".tif",
+        ".webp",
+        ".svg",
+        ".ico",
+        ".heic",
+        ".heif",
+    ]
+    return file_path.suffix.lower() in media_extensions
 
 
 # Create FastAPI app
@@ -1035,6 +1176,259 @@ async def move_non_duplicate_files(
         raise HTTPException(
             status_code=500,
             detail=f"Error during file move operation: {str(e)}",
+        )
+
+
+@app.post("/api/v1/recover/subtitle-folders")
+async def recover_subtitle_folders(
+    dry_run: bool = True,
+    subtitle_extensions: Optional[List[str]] = Body(None),
+):
+    """
+    Traverse the recycled movies directory and move folders that have subtitles
+    in the root to the recovered movies directory.
+
+    This function:
+    - Scans all folders in the recycled movies directory
+    - Identifies folders that contain subtitle files in their root
+    - Moves only the folder structure and subtitle files (not media files or images)
+    - Preserves the folder structure during the move
+
+    Args:
+        dry_run: If True, only show what would be moved (default: True)
+        subtitle_extensions: List of subtitle file extensions (with leading dot).
+                            If None, uses DEFAULT_SUBTITLE_EXTENSIONS
+
+    Returns:
+        dict: Recovery results including folders found, moved, and errors
+    """
+    start_time = time.time()
+
+    recycled_dir = get_recycled_movies_directory()
+    recovered_dir = get_recovered_movies_directory()
+
+    if subtitle_extensions is None:
+        subtitle_extensions = DEFAULT_SUBTITLE_EXTENSIONS
+
+    try:
+        recycled_path = Path(recycled_dir).resolve()
+        recovered_path = Path(recovered_dir).resolve()
+
+        # Validate both directories
+        validate_directory(recycled_path, recycled_dir, "comparison")
+        validate_directory(recovered_path, recovered_dir, "comparison")
+
+        # Ensure recovered directory exists
+        recovered_path.mkdir(parents=True, exist_ok=True)
+
+        logger.info(
+            f"Subtitle recovery: Scanning {recycled_path} for folders with subtitles"
+        )
+
+        # Get all subdirectories in recycled directory
+        folders_to_check = []
+        try:
+            for item in recycled_path.iterdir():
+                if item.is_dir():
+                    folders_to_check.append(item)
+        except Exception as e:
+            recovery_errors_total.labels(
+                recycled_directory=recycled_dir,
+                recovered_directory=recovered_dir,
+                error_type="directory_read_error",
+            ).inc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error reading recycled directory: {str(e)}",
+            )
+
+        # Record metric for folders scanned
+        recovery_folders_scanned_total.labels(
+            recycled_directory=recycled_dir, dry_run=str(dry_run).lower()
+        ).inc(len(folders_to_check))
+
+        # Find folders with subtitles in root
+        folders_with_subtitles = []
+        for folder_path in folders_to_check:
+            if has_subtitle_in_root(folder_path, subtitle_extensions):
+                folders_with_subtitles.append(folder_path)
+
+        logger.info(
+            f"Found {len(folders_with_subtitles)} folders with subtitles in root"
+        )
+
+        # Record metric for folders with subtitles found
+        recovery_folders_with_subtitles_found.labels(
+            recycled_directory=recycled_dir, dry_run=str(dry_run).lower()
+        ).set(len(folders_with_subtitles))
+
+        moved_folders = []
+        subtitle_files_moved = 0
+        errors = []
+
+        # Process each folder with subtitles
+        for folder_path in folders_with_subtitles:
+            folder_name = folder_path.name
+            target_folder_path = recovered_path / folder_name
+
+            if not dry_run:
+                try:
+                    # Check if target folder already exists
+                    if target_folder_path.exists():
+                        error_msg = (
+                            f"Target folder {target_folder_path} already exists"
+                        )
+                        logger.warning(error_msg)
+                        errors.append(error_msg)
+                        recovery_errors_total.labels(
+                            recycled_directory=recycled_dir,
+                            recovered_directory=recovered_dir,
+                            error_type="target_exists",
+                        ).inc()
+                        continue
+
+                    logger.info(
+                        f"Starting to move folder: {folder_name} from {folder_path} to {target_folder_path}"
+                    )
+
+                    # Create target folder
+                    target_folder_path.mkdir(parents=True, exist_ok=True)
+
+                    # Move folder structure and subtitle files only
+                    # Walk through the source folder
+                    for root, dirs, files in os.walk(folder_path):
+                        # Calculate relative path from source folder
+                        rel_path = Path(root).relative_to(folder_path)
+                        target_dir = target_folder_path / rel_path
+
+                        # Create target directory structure
+                        target_dir.mkdir(parents=True, exist_ok=True)
+
+                        # Move files: only subtitle files, skip media files
+                        for file in files:
+                            source_file = Path(root) / file
+                            target_file = target_dir / file
+
+                            # Only move subtitle files, skip media files and images
+                            if is_subtitle_file(source_file, subtitle_extensions):
+                                import shutil
+
+                                shutil.move(str(source_file), str(target_file))
+                                subtitle_files_moved += 1
+                                logger.debug(
+                                    f"Moved subtitle file: {source_file.name} to {target_file}"
+                                )
+                            elif is_media_file(source_file):
+                                # Skip media files - don't move them
+                                logger.debug(
+                                    f"Skipping media file: {source_file.name}"
+                                )
+                            else:
+                                # For other files (like .nfo, .txt, etc.), move them
+                                # to preserve folder structure
+                                import shutil
+
+                                shutil.move(str(source_file), str(target_file))
+                                logger.debug(
+                                    f"Moved other file: {source_file.name} to {target_file}"
+                                )
+
+                    # After moving all files, remove empty source folder structure
+                    # Only remove if folder is empty or only contains empty subdirectories
+                    def remove_empty_dirs(path: Path):
+                        """Recursively remove empty directories"""
+                        try:
+                            for item in path.iterdir():
+                                if item.is_dir():
+                                    remove_empty_dirs(item)
+                            # Try to remove directory if it's empty
+                            try:
+                                path.rmdir()
+                            except OSError:
+                                pass  # Directory not empty, skip
+                        except Exception:
+                            pass  # Error reading directory, skip
+
+                    remove_empty_dirs(folder_path)
+
+                    moved_folders.append(folder_name)
+                    logger.info(
+                        f"Successfully finished moving folder: {folder_name}"
+                    )
+                    recovery_folders_moved_total.labels(
+                        recycled_directory=recycled_dir,
+                        recovered_directory=recovered_dir,
+                        dry_run=str(dry_run).lower(),
+                    ).inc()
+
+                except Exception as e:
+                    error_msg = f"Failed to move folder {folder_name}: {str(e)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+                    recovery_errors_total.labels(
+                        recycled_directory=recycled_dir,
+                        recovered_directory=recovered_dir,
+                        error_type="folder_move_error",
+                    ).inc()
+            else:
+                # Dry run mode - just count what would be moved
+                logger.info(
+                    f"DRY RUN: Would move folder: {folder_name} from {folder_path} to {target_folder_path}"
+                )
+                moved_folders.append(folder_name)
+
+                # Count subtitle files that would be moved
+                for root, dirs, files in os.walk(folder_path):
+                    for file in files:
+                        source_file = Path(root) / file
+                        if is_subtitle_file(source_file, subtitle_extensions):
+                            subtitle_files_moved += 1
+
+        # Record metric for subtitle files moved
+        if subtitle_files_moved > 0:
+            recovery_subtitle_files_moved_total.labels(
+                recycled_directory=recycled_dir,
+                recovered_directory=recovered_dir,
+                dry_run=str(dry_run).lower(),
+            ).inc(subtitle_files_moved)
+
+        # Record operation duration
+        operation_duration = time.time() - start_time
+        recovery_operation_duration.labels(
+            operation_type="recover_subtitle_folders",
+            recycled_directory=recycled_dir,
+            recovered_directory=recovered_dir,
+        ).observe(operation_duration)
+
+        response = {
+            "recycled_directory": str(recycled_path),
+            "recovered_directory": str(recovered_path),
+            "dry_run": dry_run,
+            "subtitle_extensions": subtitle_extensions,
+            "folders_scanned": len(folders_to_check),
+            "folders_with_subtitles_found": len(folders_with_subtitles),
+            "folders_moved": len(moved_folders),
+            "subtitle_files_moved": subtitle_files_moved,
+            "errors": len(errors),
+            "folders_with_subtitles": [f.name for f in folders_with_subtitles],
+            "moved_folders": moved_folders,
+            "error_details": errors,
+        }
+
+        return response
+
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 404 for missing directories) as-is
+        raise
+    except Exception as e:
+        recovery_errors_total.labels(
+            recycled_directory=recycled_dir,
+            recovered_directory=recovered_dir,
+            error_type="operation_error",
+        ).inc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error during subtitle recovery operation: {str(e)}",
         )
 
 
