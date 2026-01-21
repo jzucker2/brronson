@@ -24,6 +24,8 @@ RUN apt-get update \
 RUN mkdir -p /tmp
 RUN mkdir -p /data
 RUN mkdir -p /target
+RUN mkdir -p /recycled/movies
+RUN mkdir -p /salvaged/movies
 
 # Install curl for health checks
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*

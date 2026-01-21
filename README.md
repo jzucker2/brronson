@@ -84,6 +84,7 @@ A simple self hosted application for helping with media management for the -arr 
 - `GET /api/v1/items/{item_id}` - Get a specific item by ID
 - `GET /api/v1/compare/directories` - Compare subdirectories between directories
 - `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories between directories
+- `POST /api/v1/salvage/subtitle-folders` - Salvage folders with subtitles from recycled movies directory
 
 ### File Cleanup Endpoints
 
@@ -305,6 +306,112 @@ curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?skip_cleanup=true
 - **Progress Tracking**: `remaining_files` field shows how many files still need to be moved
 - **Prometheus Metrics**: Records both move operations and cleanup operations
 
+### Subtitle Salvage Endpoints
+
+- `POST /api/v1/salvage/subtitle-folders` - Salvage folders with subtitles from recycled movies directory
+
+#### Subtitle Salvage Usage
+
+The subtitle salvage endpoint helps move folders that contain subtitle files from the recycled movies directory to the salvaged movies directory. This is useful for salvaging movie folders that were moved to the recycled directory but still have subtitle files that should be preserved.
+
+**Configuration:**
+
+- `RECYCLED_MOVIES_DIRECTORY` - Source directory containing folders to scan (default: `/recycled/movies`)
+- `SALVAGED_MOVIES_DIRECTORY` - Destination directory for folders with subtitles (default: `/salvaged/movies`)
+
+**Salvage folders with subtitles (dry run - default):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/salvage/subtitle-folders"
+```
+
+**Salvage folders with subtitles (actual move):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/salvage/subtitle-folders?dry_run=false"
+```
+
+**Use custom subtitle extensions:**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/salvage/subtitle-folders?dry_run=false" \
+  -H "Content-Type: application/json" \
+  -d '[".srt", ".sub", ".vtt", ".custom"]'
+```
+
+**Use batch_size for re-entrant operations:**
+
+```bash
+# Copy up to 50 files per request (skipped files don't count)
+curl -X POST "http://localhost:1968/api/v1/salvage/subtitle-folders?dry_run=false&batch_size=50"
+```
+
+**Response format:**
+
+```json
+{
+  "recycled_directory": "/path/to/recycled/movies",
+  "salvaged_directory": "/path/to/salvaged/movies",
+  "dry_run": true,
+  "batch_size": 100,
+  "subtitle_extensions": [".srt", ".sub", ".vtt", ".ass", ".ssa", ".idx", ".sup", ".scc", ".ttml", ".dfxp", ".mcc", ".stl", ".sbv", ".smi", ".txt"],
+  "folders_scanned": 5,
+  "folders_with_subtitles_found": 2,
+  "folders_copied": 2,
+  "folders_skipped": 0,
+  "subtitle_files_copied": 4,
+  "subtitle_files_skipped": 0,
+  "batch_limit_reached": false,
+  "errors": 0,
+  "folders_with_subtitles": ["Movie1", "Movie2"],
+  "copied_folders": ["Movie1", "Movie2"],
+  "skipped_folders": [],
+  "error_details": []
+}
+```
+
+**Features:**
+
+- **Subtitle Detection**: Automatically detects folders with subtitle files in the root directory
+- **Selective File Copying**: Only copies subtitle files and folder structure, skips media files (video/images)
+- **Preserves Structure**: Maintains the complete folder structure during the copy
+- **Multiple Formats**: Supports common subtitle formats (.srt, .sub, .vtt, .ass, .ssa, etc.)
+- **Custom Extensions**: Allows custom subtitle file extensions to be specified
+- **Safe by Default**: Default `dry_run=true` prevents accidental copies
+- **Skip Existing**: Does not overwrite existing destination folders or files (skips them instead)
+- **Batch Processing**: `batch_size` parameter limits files copied per request (default: 100), making operations re-entrant
+- **Re-entrant**: Skipped files don't count toward batch_size, allowing safe resumption of interrupted operations
+- **Error Handling**: Comprehensive error reporting for failed operations
+- **Prometheus Metrics**: Records salvage operations including skipped items for monitoring
+
+**Supported Subtitle Formats:**
+
+The default configuration supports the following subtitle file extensions:
+
+- `.srt` - SubRip
+- `.sub` - SubViewer
+- `.vtt` - WebVTT
+- `.ass` - Advanced SubStation Alpha
+- `.ssa` - SubStation Alpha
+- `.idx` - VobSub index
+- `.sup` - Blu-ray subtitle
+- `.scc` - Scenarist Closed Caption
+- `.ttml` - Timed Text Markup Language
+- `.dfxp` - Distribution Format Exchange Profile
+- `.mcc` - MacCaption
+- `.stl` - Spruce subtitle
+- `.sbv` - YouTube subtitle
+- `.smi` - SAMI
+- `.txt` - Plain text (some subtitle files use this extension)
+
+**File Filtering:**
+
+The salvage operation intelligently filters files:
+
+- **Copies**: Subtitle files (based on extension list) only
+- **Skips**: Video files (.mp4, .avi, .mkv, etc.), image files (.jpg, .png, etc.), and other non-subtitle files (like .nfo, .txt, etc.)
+- **Skip Existing**: If a destination folder or file already exists, it is skipped (not overwritten) and logged in the response
+
 **Cleanup Integration:**
 
 The move operation now includes automatic cleanup by default:
@@ -368,7 +475,18 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `brronson_move_files_moved_total` - Total files successfully moved (labels: cleanup_directory, target_directory)
 - `brronson_move_errors_total` - Total errors during file move operations (labels: cleanup_directory, target_directory, error_type)
 - `brronson_move_operation_duration_seconds` - Time spent on file move operations (labels: operation_type, cleanup_directory, target_directory)
-- `brronson_move_duplicates_found`
+- `brronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation
+
+#### Subtitle Salvage Metrics
+
+- `brronson_salvage_folders_scanned_total` - Total number of folders scanned for subtitle salvage (labels: recycled_directory, dry_run)
+- `brronson_salvage_folders_with_subtitles_found` - Current number of folders found with subtitles in root (labels: recycled_directory, dry_run)
+- `brronson_salvage_folders_copied_total` - Total number of folders successfully copied during salvage (labels: recycled_directory, salvaged_directory, dry_run)
+- `brronson_salvage_folders_skipped_total` - Total number of folders skipped during salvage (target already exists) (labels: recycled_directory, salvaged_directory, dry_run)
+- `brronson_salvage_subtitle_files_copied_total` - Total number of subtitle files copied during salvage (labels: recycled_directory, salvaged_directory, dry_run)
+- `brronson_salvage_files_skipped_total` - Total number of subtitle files skipped during salvage (target already exists) (labels: recycled_directory, salvaged_directory, dry_run)
+- `brronson_salvage_errors_total` - Total errors during subtitle salvage operations (labels: recycled_directory, salvaged_directory, error_type)
+- `brronson_salvage_operation_duration_seconds` - Time spent on subtitle salvage operations (labels: operation_type, recycled_directory, salvaged_directory)
 
 ## Deployment
 
@@ -435,18 +553,20 @@ PORT=8080 GUNICORN_WORKERS=2 GUNICORN_LOG_LEVEL=debug docker-compose up -d
 
 ### Environment Variables
 
-#### Gunicorn Configuration
+#### Gunicorn Environment Variables
 
 - `PORT` - Server port (default: `1968`)
 - `GUNICORN_WORKERS` - Number of worker processes (default: `cpu_count * 2 + 1`)
 - `GUNICORN_LOG_LEVEL` - Logging level (default: `info`)
 
-#### Application Configuration
+#### Application Environment Variables
 
 - `PROMETHEUS_MULTIPROC_DIR` - Directory for Prometheus multiprocess metrics (set to `/tmp` in Docker)
 - `ENABLE_METRICS` - Set to `true` to enable Prometheus metrics collection (default: enabled)
 - `CLEANUP_DIRECTORY` - Directory to scan for unwanted files (default: `/data`)
 - `TARGET_DIRECTORY` - Directory to move non-duplicate files to (default: `/target`)
+- `RECYCLED_MOVIES_DIRECTORY` - Directory containing recycled movie folders (default: `/recycled/movies`)
+- `SALVAGED_MOVIES_DIRECTORY` - Directory for salvaged movie folders with subtitles (default: `/salvaged/movies`)
 
 ### Logging Configuration
 
@@ -460,7 +580,7 @@ Logs are written to both console and a rotating file in the `logs/` directory. T
 
 ### Example Log Output
 
-```
+```text
 2024-01-15 10:30:15 - app.main - INFO - Starting Brronson application version 1.0.0
 2024-01-15 10:30:15 - app.main - INFO - Cleanup directory: /data
 2024-01-15 10:30:15 - app.main - INFO - Target directory: /target
