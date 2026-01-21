@@ -23,15 +23,13 @@ class TestSharedHelperMethods(unittest.TestCase):
 
         prometheus_client.REGISTRY._names_to_collectors.clear()
 
-        # Re-import to get fresh helper methods
-        from importlib import reload
+        # Import helper methods from their new locations
+        from app.helpers import find_unwanted_files, validate_directory
+        from app.config import DEFAULT_UNWANTED_PATTERNS
 
-        import app.main
-
-        reload(app.main)
-        self.validate_directory = app.main.validate_directory
-        self.find_unwanted_files = app.main.find_unwanted_files
-        self.DEFAULT_UNWANTED_PATTERNS = app.main.DEFAULT_UNWANTED_PATTERNS
+        self.validate_directory = validate_directory
+        self.find_unwanted_files = find_unwanted_files
+        self.DEFAULT_UNWANTED_PATTERNS = DEFAULT_UNWANTED_PATTERNS
 
     def tearDown(self):
         """Clean up test directory"""
@@ -142,7 +140,7 @@ class TestSharedHelperMethods(unittest.TestCase):
         (self.test_path / "test_file.txt").touch()
 
         # Call get_subdirectories with operation type
-        from app.main import get_subdirectories
+        from app.helpers import get_subdirectories
 
         result = get_subdirectories(self.test_path, "test_operation")
 

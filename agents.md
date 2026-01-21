@@ -251,6 +251,21 @@ make ci-check
 
 **Agents MUST use `make check` as part of their workflow before committing.**
 
+## File Size Guidelines
+
+**Agents MUST:**
+1. **Split Large Files**: If a file exceeds 500 lines, consider splitting it into multiple files
+2. **Modular Design**: Keep files focused on a single responsibility
+3. **Reasonable PR Size**: Avoid creating PRs with files larger than 1000 lines
+4. **Break Down Changes**: For large features, split into multiple smaller PRs when possible
+5. **File Organization**: Use appropriate directory structure (e.g., `routes/` for API endpoints)
+
+**File Organization:**
+- Keep individual route files under 500 lines when possible
+- Split helper functions into separate modules
+- Group related functionality together
+- Use subdirectories for logical grouping (e.g., `app/routes/`)
+
 ## Agent Workflow
 
 ### Before Making Changes
@@ -258,6 +273,7 @@ make ci-check
 1. **Read the Codebase**: Understand existing patterns and conventions
 2. **Check Requirements**: Review this document and project requirements
 3. **Plan Changes**: Outline the changes before implementing
+4. **Consider File Size**: If adding significant code, plan how to organize it across files
 
 ### During Development
 
@@ -266,6 +282,7 @@ make ci-check
 3. **Run Make Check**: Frequently run `make check` to format and lint code
 4. **Run Tests**: Frequently run `make test` to ensure tests pass
 5. **Fix Issues**: Address any test failures or linting errors immediately
+6. **Monitor File Size**: If a file grows beyond 500 lines, consider splitting it
 
 ### Before Committing
 
@@ -394,11 +411,13 @@ Agents working on this project must:
 7. **Always** write tests for new features
 8. **Always** update documentation
 9. **Always** follow project patterns and conventions
-10. **Never** skip pre-commit hooks
-11. **Never** commit code that doesn't pass `make check`
-12. **Never** commit code that doesn't pass linting
-13. **Never** commit code if tests fail (`make test` must pass)
-14. **Never** commit code without tests
-15. **Never** hardcode paths or configuration values
+10. **Always** keep files under 500 lines when possible, split larger files
+11. **Never** skip pre-commit hooks
+12. **Never** commit code that doesn't pass `make check`
+13. **Never** commit code that doesn't pass linting
+14. **Never** commit code if tests fail (`make test` must pass)
+15. **Never** commit code without tests
+16. **Never** hardcode paths or configuration values
+17. **Never** create files larger than 1000 lines in a single PR
 
 By following these guidelines, agents ensure code quality, maintainability, and consistency across the project.
