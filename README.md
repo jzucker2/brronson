@@ -84,7 +84,7 @@ A simple self hosted application for helping with media management for the -arr 
 - `GET /api/v1/items/{item_id}` - Get a specific item by ID
 - `GET /api/v1/compare/directories` - Compare subdirectories between directories
 - `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories between directories
-- `POST /api/v1/recover/subtitle-folders` - Recover folders with subtitles from recycled movies directory
+- `POST /api/v1/salvage/subtitle-folders` - Salvage folders with subtitles from recycled movies directory
 
 ### File Cleanup Endpoints
 
@@ -306,35 +306,35 @@ curl -X POST "http://localhost:1968/api/v1/move/non-duplicates?skip_cleanup=true
 - **Progress Tracking**: `remaining_files` field shows how many files still need to be moved
 - **Prometheus Metrics**: Records both move operations and cleanup operations
 
-### Subtitle Recovery Endpoints
+### Subtitle Salvage Endpoints
 
-- `POST /api/v1/recover/subtitle-folders` - Recover folders with subtitles from recycled movies directory
+- `POST /api/v1/salvage/subtitle-folders` - Salvage folders with subtitles from recycled movies directory
 
-#### Subtitle Recovery Usage
+#### Subtitle Salvage Usage
 
-The subtitle recovery endpoint helps move folders that contain subtitle files from the recycled movies directory to the recovered movies directory. This is useful for recovering movie folders that were moved to the recycled directory but still have subtitle files that should be preserved.
+The subtitle salvage endpoint helps move folders that contain subtitle files from the recycled movies directory to the salvaged movies directory. This is useful for salvaging movie folders that were moved to the recycled directory but still have subtitle files that should be preserved.
 
 **Configuration:**
 
 - `RECYCLED_MOVIES_DIRECTORY` - Source directory containing folders to scan (default: `/recycled/movies`)
-- `RECOVERED_MOVIES_DIRECTORY` - Destination directory for folders with subtitles (default: `/recovered/movies`)
+- `SALVAGED_MOVIES_DIRECTORY` - Destination directory for folders with subtitles (default: `/salvaged/movies`)
 
-**Recover folders with subtitles (dry run - default):**
+**Salvage folders with subtitles (dry run - default):**
 
 ```bash
-curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders"
+curl -X POST "http://localhost:1968/api/v1/salvage/subtitle-folders"
 ```
 
-**Recover folders with subtitles (actual move):**
+**Salvage folders with subtitles (actual move):**
 
 ```bash
-curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=false"
+curl -X POST "http://localhost:1968/api/v1/salvage/subtitle-folders?dry_run=false"
 ```
 
 **Use custom subtitle extensions:**
 
 ```bash
-curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=false" \
+curl -X POST "http://localhost:1968/api/v1/salvage/subtitle-folders?dry_run=false" \
   -H "Content-Type: application/json" \
   -d '[".srt", ".sub", ".vtt", ".custom"]'
 ```
@@ -343,7 +343,7 @@ curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=fals
 
 ```bash
 # Copy up to 50 files per request (skipped files don't count)
-curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=false&batch_size=50"
+curl -X POST "http://localhost:1968/api/v1/salvage/subtitle-folders?dry_run=false&batch_size=50"
 ```
 
 **Response format:**
@@ -351,7 +351,7 @@ curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=fals
 ```json
 {
   "recycled_directory": "/path/to/recycled/movies",
-  "recovered_directory": "/path/to/recovered/movies",
+  "salvaged_directory": "/path/to/salvaged/movies",
   "dry_run": true,
   "batch_size": 100,
   "subtitle_extensions": [".srt", ".sub", ".vtt", ".ass", ".ssa", ".idx", ".sup", ".scc", ".ttml", ".dfxp", ".mcc", ".stl", ".sbv", ".smi", ".txt"],
@@ -382,7 +382,7 @@ curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=fals
 - **Batch Processing**: `batch_size` parameter limits files copied per request (default: 100), making operations re-entrant
 - **Re-entrant**: Skipped files don't count toward batch_size, allowing safe resumption of interrupted operations
 - **Error Handling**: Comprehensive error reporting for failed operations
-- **Prometheus Metrics**: Records recovery operations including skipped items for monitoring
+- **Prometheus Metrics**: Records salvage operations including skipped items for monitoring
 
 **Supported Subtitle Formats:**
 
@@ -406,7 +406,7 @@ The default configuration supports the following subtitle file extensions:
 
 **File Filtering:**
 
-The recovery operation intelligently filters files:
+The salvage operation intelligently filters files:
 
 - **Copies**: Subtitle files (based on extension list) only
 - **Skips**: Video files (.mp4, .avi, .mkv, etc.), image files (.jpg, .png, etc.), and other non-subtitle files (like .nfo, .txt, etc.)
@@ -477,16 +477,16 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `brronson_move_operation_duration_seconds` - Time spent on file move operations (labels: operation_type, cleanup_directory, target_directory)
 - `brronson_move_duplicates_found` - Number of duplicate subdirectories found during move operation
 
-#### Subtitle Recovery Metrics
+#### Subtitle Salvage Metrics
 
-- `brronson_recovery_folders_scanned_total` - Total number of folders scanned for subtitle recovery (labels: recycled_directory, dry_run)
-- `brronson_recovery_folders_with_subtitles_found` - Current number of folders found with subtitles in root (labels: recycled_directory, dry_run)
-- `brronson_recovery_folders_copied_total` - Total number of folders successfully copied during recovery (labels: recycled_directory, recovered_directory, dry_run)
-- `brronson_recovery_folders_skipped_total` - Total number of folders skipped during recovery (target already exists) (labels: recycled_directory, recovered_directory, dry_run)
-- `brronson_recovery_subtitle_files_copied_total` - Total number of subtitle files copied during recovery (labels: recycled_directory, recovered_directory, dry_run)
-- `brronson_recovery_files_skipped_total` - Total number of subtitle files skipped during recovery (target already exists) (labels: recycled_directory, recovered_directory, dry_run)
-- `brronson_recovery_errors_total` - Total errors during subtitle recovery operations (labels: recycled_directory, recovered_directory, error_type)
-- `brronson_recovery_operation_duration_seconds` - Time spent on subtitle recovery operations (labels: operation_type, recycled_directory, recovered_directory)
+- `brronson_salvage_folders_scanned_total` - Total number of folders scanned for subtitle salvage (labels: recycled_directory, dry_run)
+- `brronson_salvage_folders_with_subtitles_found` - Current number of folders found with subtitles in root (labels: recycled_directory, dry_run)
+- `brronson_salvage_folders_copied_total` - Total number of folders successfully copied during salvage (labels: recycled_directory, salvaged_directory, dry_run)
+- `brronson_salvage_folders_skipped_total` - Total number of folders skipped during salvage (target already exists) (labels: recycled_directory, salvaged_directory, dry_run)
+- `brronson_salvage_subtitle_files_copied_total` - Total number of subtitle files copied during salvage (labels: recycled_directory, salvaged_directory, dry_run)
+- `brronson_salvage_files_skipped_total` - Total number of subtitle files skipped during salvage (target already exists) (labels: recycled_directory, salvaged_directory, dry_run)
+- `brronson_salvage_errors_total` - Total errors during subtitle salvage operations (labels: recycled_directory, salvaged_directory, error_type)
+- `brronson_salvage_operation_duration_seconds` - Time spent on subtitle salvage operations (labels: operation_type, recycled_directory, salvaged_directory)
 
 ## Deployment
 
@@ -566,7 +566,7 @@ PORT=8080 GUNICORN_WORKERS=2 GUNICORN_LOG_LEVEL=debug docker-compose up -d
 - `CLEANUP_DIRECTORY` - Directory to scan for unwanted files (default: `/data`)
 - `TARGET_DIRECTORY` - Directory to move non-duplicate files to (default: `/target`)
 - `RECYCLED_MOVIES_DIRECTORY` - Directory containing recycled movie folders (default: `/recycled/movies`)
-- `RECOVERED_MOVIES_DIRECTORY` - Directory for recovered movie folders with subtitles (default: `/recovered/movies`)
+- `SALVAGED_MOVIES_DIRECTORY` - Directory for salvaged movie folders with subtitles (default: `/salvaged/movies`)
 
 ### Logging Configuration
 

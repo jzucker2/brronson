@@ -1696,28 +1696,28 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         self.assertIn("brronson_cleanup_directory_size_bytes", metrics_text)
 
 
-class TestSubtitleRecovery(unittest.TestCase):
-    """Test the subtitle recovery functionality"""
+class TestSubtitleSalvage(unittest.TestCase):
+    """Test the subtitle salvage functionality"""
 
     def setUp(self):
-        """Set up test directories for subtitle recovery"""
+        """Set up test directories for subtitle salvage"""
         self.test_dir = tempfile.mkdtemp()
         self.recycled_dir = Path(self.test_dir) / "recycled"
-        self.recovered_dir = Path(self.test_dir) / "recovered"
+        self.salvaged_dir = Path(self.test_dir) / "salvaged"
 
         # Create test directories
         self.recycled_dir.mkdir()
-        self.recovered_dir.mkdir()
+        self.salvaged_dir.mkdir()
 
         # Set environment variables
         self.original_recycled_dir = os.environ.get(
             "RECYCLED_MOVIES_DIRECTORY"
         )
-        self.original_recovered_dir = os.environ.get(
-            "RECOVERED_MOVIES_DIRECTORY"
+        self.original_salvaged_dir = os.environ.get(
+            "SALVAGED_MOVIES_DIRECTORY"
         )
         os.environ["RECYCLED_MOVIES_DIRECTORY"] = str(self.recycled_dir)
-        os.environ["RECOVERED_MOVIES_DIRECTORY"] = str(self.recovered_dir)
+        os.environ["SALVAGED_MOVIES_DIRECTORY"] = str(self.salvaged_dir)
 
         # Clear Prometheus default registry
         import prometheus_client
@@ -1746,15 +1746,15 @@ class TestSubtitleRecovery(unittest.TestCase):
         elif "RECYCLED_MOVIES_DIRECTORY" in os.environ:
             del os.environ["RECYCLED_MOVIES_DIRECTORY"]
 
-        if self.original_recovered_dir is not None:
-            os.environ["RECOVERED_MOVIES_DIRECTORY"] = (
-                self.original_recovered_dir
+        if self.original_salvaged_dir is not None:
+            os.environ["SALVAGED_MOVIES_DIRECTORY"] = (
+                self.original_salvaged_dir
             )
-        elif "RECOVERED_MOVIES_DIRECTORY" in os.environ:
-            del os.environ["RECOVERED_MOVIES_DIRECTORY"]
+        elif "SALVAGED_MOVIES_DIRECTORY" in os.environ:
+            del os.environ["SALVAGED_MOVIES_DIRECTORY"]
 
-    def test_recover_subtitle_folders_dry_run(self):
-        """Test subtitle recovery endpoint in dry run mode (default)"""
+    def test_salvage_subtitle_folders_dry_run(self):
+        """Test subtitle salvage endpoint in dry run mode (default)"""
         # Create folder with subtitle in root
         folder_with_subtitle = self.recycled_dir / "Movie1"
         folder_with_subtitle.mkdir()
@@ -1769,13 +1769,13 @@ class TestSubtitleRecovery(unittest.TestCase):
         (folder_without_subtitle / "subdir").mkdir()
         (folder_without_subtitle / "subdir" / "subtitle.srt").touch()
 
-        response = client.post("/api/v1/recover/subtitle-folders")
+        response = client.post("/api/v1/salvage/subtitle-folders")
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
         # Check response structure
         self.assertIn("recycled_directory", data)
-        self.assertIn("recovered_directory", data)
+        self.assertIn("salvaged_directory", data)
         self.assertIn("dry_run", data)
         self.assertIn("subtitle_extensions", data)
         self.assertIn("folders_scanned", data)
@@ -1804,8 +1804,8 @@ class TestSubtitleRecovery(unittest.TestCase):
         self.assertTrue((folder_with_subtitle / "subtitle.srt").exists())
         self.assertTrue((folder_with_subtitle / "poster.jpg").exists())
 
-    def test_recover_subtitle_folders_actual_move(self):
-        """Test subtitle recovery endpoint with actual folder copying"""
+    def test_salvage_subtitle_folders_actual_move(self):
+        """Test subtitle salvage endpoint with actual folder copying"""
         # Create folder with subtitle in root
         folder_with_subtitle = self.recycled_dir / "Movie1"
         folder_with_subtitle.mkdir()
@@ -1829,7 +1829,7 @@ class TestSubtitleRecovery(unittest.TestCase):
         ).touch()  # Should move
 
         response = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false"
+            "/api/v1/salvage/subtitle-folders?dry_run=false"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -1845,23 +1845,23 @@ class TestSubtitleRecovery(unittest.TestCase):
         self.assertEqual(data["subtitle_files_skipped"], 0)
         self.assertEqual(data["errors"], 0)
 
-        # Verify folder was copied to recovered directory
-        self.assertTrue((self.recovered_dir / "Movie1").exists())
+        # Verify folder was copied to salvaged directory
+        self.assertTrue((self.salvaged_dir / "Movie1").exists())
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle.srt").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle.srt").exists()
         )
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subs" / "subtitle2.srt").exists()
+            (self.salvaged_dir / "Movie1" / "subs" / "subtitle2.srt").exists()
         )
         # Verify non-subtitle files are NOT copied
-        self.assertFalse((self.recovered_dir / "Movie1" / "info.nfo").exists())
+        self.assertFalse((self.salvaged_dir / "Movie1" / "info.nfo").exists())
 
-        # Verify media files were NOT copied (should not be in recovered)
+        # Verify media files were NOT copied (should not be in salvaged)
         self.assertFalse(
-            (self.recovered_dir / "Movie1" / "movie.mp4").exists()
+            (self.salvaged_dir / "Movie1" / "movie.mp4").exists()
         )
         self.assertFalse(
-            (self.recovered_dir / "Movie1" / "poster.jpg").exists()
+            (self.salvaged_dir / "Movie1" / "poster.jpg").exists()
         )
 
         # Verify original files still exist in recycled directory (copied, not moved)
@@ -1878,8 +1878,8 @@ class TestSubtitleRecovery(unittest.TestCase):
         # Verify original folder still exists (files were copied, not moved)
         self.assertTrue((self.recycled_dir / "Movie1").exists())
 
-    def test_recover_subtitle_folders_multiple_subtitle_formats(self):
-        """Test subtitle recovery with multiple subtitle file formats"""
+    def test_salvage_subtitle_folders_multiple_subtitle_formats(self):
+        """Test subtitle salvage with multiple subtitle file formats"""
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "subtitle.srt").touch()
@@ -1888,27 +1888,27 @@ class TestSubtitleRecovery(unittest.TestCase):
         (folder / "subtitle.sub").touch()
 
         response = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false"
+            "/api/v1/salvage/subtitle-folders?dry_run=false"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
         self.assertEqual(data["subtitle_files_copied"], 4)
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle.srt").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle.srt").exists()
         )
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle.ass").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle.ass").exists()
         )
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle.vtt").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle.vtt").exists()
         )
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle.sub").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle.sub").exists()
         )
 
-    def test_recover_subtitle_folders_custom_extensions(self):
-        """Test subtitle recovery with custom subtitle extensions"""
+    def test_salvage_subtitle_folders_custom_extensions(self):
+        """Test subtitle salvage with custom subtitle extensions"""
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "subtitle.srt").touch()
@@ -1917,7 +1917,7 @@ class TestSubtitleRecovery(unittest.TestCase):
         custom_extensions = [".srt", ".custom"]
 
         response = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false",
+            "/api/v1/salvage/subtitle-folders?dry_run=false",
             json=custom_extensions,
         )
         self.assertEqual(response.status_code, 200)
@@ -1929,15 +1929,15 @@ class TestSubtitleRecovery(unittest.TestCase):
         # Should have copied both files
         self.assertEqual(data["subtitle_files_copied"], 2)
 
-    def test_recover_subtitle_folders_no_subtitles(self):
-        """Test subtitle recovery when no folders have subtitles"""
+    def test_salvage_subtitle_folders_no_subtitles(self):
+        """Test subtitle salvage when no folders have subtitles"""
         # Create folder without subtitle in root
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "movie.mp4").touch()
         (folder / "poster.jpg").touch()
 
-        response = client.post("/api/v1/recover/subtitle-folders")
+        response = client.post("/api/v1/salvage/subtitle-folders")
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
@@ -1946,9 +1946,9 @@ class TestSubtitleRecovery(unittest.TestCase):
         self.assertEqual(data["folders_copied"], 0)
         self.assertEqual(data["subtitle_files_copied"], 0)
 
-    def test_recover_subtitle_folders_empty_directories(self):
-        """Test subtitle recovery with empty directories"""
-        response = client.post("/api/v1/recover/subtitle-folders")
+    def test_salvage_subtitle_folders_empty_directories(self):
+        """Test subtitle salvage with empty directories"""
+        response = client.post("/api/v1/salvage/subtitle-folders")
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
@@ -1956,46 +1956,46 @@ class TestSubtitleRecovery(unittest.TestCase):
         self.assertEqual(data["folders_with_subtitles_found"], 0)
         self.assertEqual(data["folders_copied"], 0)
 
-    def test_recover_subtitle_folders_nonexistent_recycled(self):
-        """Test subtitle recovery with nonexistent recycled directory"""
+    def test_salvage_subtitle_folders_nonexistent_recycled(self):
+        """Test subtitle salvage with nonexistent recycled directory"""
         os.environ["RECYCLED_MOVIES_DIRECTORY"] = "/nonexistent/recycled"
 
-        response = client.post("/api/v1/recover/subtitle-folders")
+        response = client.post("/api/v1/salvage/subtitle-folders")
         self.assertEqual(response.status_code, 404)
 
-    def test_recover_subtitle_folders_nonexistent_recovered(self):
-        """Test subtitle recovery with nonexistent recovered directory"""
+    def test_salvage_subtitle_folders_nonexistent_salvaged(self):
+        """Test subtitle salvage with nonexistent salvaged directory"""
         # Create recycled directory with content
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "subtitle.srt").touch()
 
-        os.environ["RECOVERED_MOVIES_DIRECTORY"] = "/nonexistent/recovered"
+        os.environ["SALVAGED_MOVIES_DIRECTORY"] = "/nonexistent/salvaged"
 
-        response = client.post("/api/v1/recover/subtitle-folders")
+        response = client.post("/api/v1/salvage/subtitle-folders")
         self.assertEqual(response.status_code, 404)
 
-    def test_recover_subtitle_folders_metrics(self):
-        """Test that subtitle recovery records metrics"""
+    def test_salvage_subtitle_folders_metrics(self):
+        """Test that subtitle salvage records metrics"""
         # Create folder with subtitle
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "subtitle.srt").touch()
 
-        response = client.post("/api/v1/recover/subtitle-folders")
+        response = client.post("/api/v1/salvage/subtitle-folders")
         self.assertEqual(response.status_code, 200)
 
         # Check metrics
         metrics_response = client.get("/metrics")
         metrics_text = metrics_response.text
 
-        # Should have recovery metrics
-        self.assertIn("brronson_recovery_folders_scanned_total", metrics_text)
+        # Should have salvage metrics
+        self.assertIn("brronson_salvage_folders_scanned_total", metrics_text)
         self.assertIn(
-            "brronson_recovery_folders_with_subtitles_found", metrics_text
+            "brronson_salvage_folders_with_subtitles_found", metrics_text
         )
         self.assertIn(
-            "brronson_recovery_operation_duration_seconds", metrics_text
+            "brronson_salvage_operation_duration_seconds", metrics_text
         )
 
         # Use the resolved path format
@@ -2004,7 +2004,7 @@ class TestSubtitleRecovery(unittest.TestCase):
         # Check folders scanned metric
         assert_metric_with_labels(
             metrics_text,
-            "brronson_recovery_folders_scanned_total",
+            "brronson_salvage_folders_scanned_total",
             {
                 "recycled_directory": recycled_path_resolved,
                 "dry_run": "true",
@@ -2015,7 +2015,7 @@ class TestSubtitleRecovery(unittest.TestCase):
         # Check folders with subtitles found metric
         assert_metric_with_labels(
             metrics_text,
-            "brronson_recovery_folders_with_subtitles_found",
+            "brronson_salvage_folders_with_subtitles_found",
             {
                 "recycled_directory": recycled_path_resolved,
                 "dry_run": "true",
@@ -2023,18 +2023,18 @@ class TestSubtitleRecovery(unittest.TestCase):
             "1.0",
         )
 
-    def test_recover_subtitle_folders_target_exists(self):
-        """Test subtitle recovery when target folder already exists"""
+    def test_salvage_subtitle_folders_target_exists(self):
+        """Test subtitle salvage when target folder already exists"""
         # Create folder with subtitle in recycled
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "subtitle.srt").touch()
 
-        # Create folder with same name in recovered (empty folder)
-        (self.recovered_dir / "Movie1").mkdir()
+        # Create folder with same name in salvaged (empty folder)
+        (self.salvaged_dir / "Movie1").mkdir()
 
         response = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false"
+            "/api/v1/salvage/subtitle-folders?dry_run=false"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -2049,23 +2049,23 @@ class TestSubtitleRecovery(unittest.TestCase):
 
         # Verify file was copied into existing folder
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle.srt").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle.srt").exists()
         )
 
-    def test_recover_subtitle_folders_file_exists(self):
-        """Test subtitle recovery when destination file already exists"""
+    def test_salvage_subtitle_folders_file_exists(self):
+        """Test subtitle salvage when destination file already exists"""
         # Create folder with subtitle in recycled
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "subtitle.srt").touch()
         (folder / "subtitle2.srt").touch()
 
-        # Create folder and one subtitle file in recovered
-        (self.recovered_dir / "Movie1").mkdir()
-        (self.recovered_dir / "Movie1" / "subtitle.srt").write_text("existing")
+        # Create folder and one subtitle file in salvaged
+        (self.salvaged_dir / "Movie1").mkdir()
+        (self.salvaged_dir / "Movie1" / "subtitle.srt").write_text("existing")
 
         response = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false"
+            "/api/v1/salvage/subtitle-folders?dry_run=false"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -2081,26 +2081,26 @@ class TestSubtitleRecovery(unittest.TestCase):
 
         # Verify existing file was not overwritten
         self.assertEqual(
-            (self.recovered_dir / "Movie1" / "subtitle.srt").read_text(),
+            (self.salvaged_dir / "Movie1" / "subtitle.srt").read_text(),
             "existing",
         )
         # Verify new file was copied
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle2.srt").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle2.srt").exists()
         )
 
-    def test_recover_subtitle_folders_dry_run_skips_existing(self):
+    def test_salvage_subtitle_folders_dry_run_skips_existing(self):
         """Test that dry run correctly identifies folders/files that would be skipped"""
         # Create folder with subtitle in recycled
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "subtitle.srt").touch()
 
-        # Create folder and file in recovered
-        (self.recovered_dir / "Movie1").mkdir()
-        (self.recovered_dir / "Movie1" / "subtitle.srt").touch()
+        # Create folder and file in salvaged
+        (self.salvaged_dir / "Movie1").mkdir()
+        (self.salvaged_dir / "Movie1" / "subtitle.srt").touch()
 
-        response = client.post("/api/v1/recover/subtitle-folders")
+        response = client.post("/api/v1/salvage/subtitle-folders")
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
@@ -2110,8 +2110,8 @@ class TestSubtitleRecovery(unittest.TestCase):
         self.assertEqual(data["subtitle_files_skipped"], 1)
         self.assertIn("Movie1", data["skipped_folders"])
 
-    def test_recover_subtitle_folders_preserves_structure(self):
-        """Test that subtitle recovery preserves folder structure"""
+    def test_salvage_subtitle_folders_preserves_structure(self):
+        """Test that subtitle salvage preserves folder structure"""
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "subtitle.srt").touch()
@@ -2124,31 +2124,31 @@ class TestSubtitleRecovery(unittest.TestCase):
         (folder / "subs" / "fr" / "subtitle.srt").touch()
 
         response = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false"
+            "/api/v1/salvage/subtitle-folders?dry_run=false"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
         # Verify structure is preserved
-        self.assertTrue((self.recovered_dir / "Movie1").exists())
+        self.assertTrue((self.salvaged_dir / "Movie1").exists())
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle.srt").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle.srt").exists()
         )
         self.assertTrue(
             (
-                self.recovered_dir / "Movie1" / "subs" / "en" / "subtitle.srt"
+                self.salvaged_dir / "Movie1" / "subs" / "en" / "subtitle.srt"
             ).exists()
         )
         self.assertTrue(
             (
-                self.recovered_dir / "Movie1" / "subs" / "fr" / "subtitle.srt"
+                self.salvaged_dir / "Movie1" / "subs" / "fr" / "subtitle.srt"
             ).exists()
         )
 
         self.assertEqual(data["subtitle_files_copied"], 3)
 
-    def test_recover_subtitle_folders_skips_media_files(self):
-        """Test that subtitle recovery skips media files and images"""
+    def test_salvage_subtitle_folders_skips_media_files(self):
+        """Test that subtitle salvage skips media files and images"""
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "movie.mp4").touch()  # Video
@@ -2158,7 +2158,7 @@ class TestSubtitleRecovery(unittest.TestCase):
         (folder / "subtitle.srt").touch()  # Subtitle - should move
 
         response = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false"
+            "/api/v1/salvage/subtitle-folders?dry_run=false"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -2166,27 +2166,27 @@ class TestSubtitleRecovery(unittest.TestCase):
         # Only subtitle should be copied
         self.assertEqual(data["subtitle_files_copied"], 1)
 
-        # Verify media files are NOT in recovered directory
+        # Verify media files are NOT in salvaged directory
         self.assertFalse(
-            (self.recovered_dir / "Movie1" / "movie.mp4").exists()
+            (self.salvaged_dir / "Movie1" / "movie.mp4").exists()
         )
         self.assertFalse(
-            (self.recovered_dir / "Movie1" / "movie.avi").exists()
+            (self.salvaged_dir / "Movie1" / "movie.avi").exists()
         )
         self.assertFalse(
-            (self.recovered_dir / "Movie1" / "poster.jpg").exists()
+            (self.salvaged_dir / "Movie1" / "poster.jpg").exists()
         )
         self.assertFalse(
-            (self.recovered_dir / "Movie1" / "poster.png").exists()
+            (self.salvaged_dir / "Movie1" / "poster.png").exists()
         )
 
-        # Verify subtitle IS in recovered directory
+        # Verify subtitle IS in salvaged directory
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle.srt").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle.srt").exists()
         )
 
-    def test_recover_subtitle_folders_skips_existing_files(self):
-        """Test that subtitle recovery skips existing destination files"""
+    def test_salvage_subtitle_folders_skips_existing_files(self):
+        """Test that subtitle salvage skips existing destination files"""
         # Create folder with multiple subtitles in recycled
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
@@ -2194,13 +2194,13 @@ class TestSubtitleRecovery(unittest.TestCase):
         (folder / "subtitle2.srt").touch()
         (folder / "subtitle3.srt").touch()
 
-        # Create folder and one existing subtitle in recovered
-        (self.recovered_dir / "Movie1").mkdir()
-        existing_file = self.recovered_dir / "Movie1" / "subtitle2.srt"
+        # Create folder and one existing subtitle in salvaged
+        (self.salvaged_dir / "Movie1").mkdir()
+        existing_file = self.salvaged_dir / "Movie1" / "subtitle2.srt"
         existing_file.write_text("existing content")
 
         response = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false"
+            "/api/v1/salvage/subtitle-folders?dry_run=false"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -2216,24 +2216,24 @@ class TestSubtitleRecovery(unittest.TestCase):
         self.assertEqual(existing_file.read_text(), "existing content")
         # Verify new files were copied
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle1.srt").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle1.srt").exists()
         )
         self.assertTrue(
-            (self.recovered_dir / "Movie1" / "subtitle3.srt").exists()
+            (self.salvaged_dir / "Movie1" / "subtitle3.srt").exists()
         )
 
-    def test_recover_subtitle_folders_skip_metrics(self):
+    def test_salvage_subtitle_folders_skip_metrics(self):
         """Test that skip metrics are recorded correctly"""
         # Create folder with subtitle in recycled
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
         (folder / "subtitle.srt").touch()
 
-        # Create folder with existing file in recovered to trigger skip
-        (self.recovered_dir / "Movie1").mkdir()
-        (self.recovered_dir / "Movie1" / "subtitle.srt").write_text("existing")
+        # Create folder with existing file in salvaged to trigger skip
+        (self.salvaged_dir / "Movie1").mkdir()
+        (self.salvaged_dir / "Movie1" / "subtitle.srt").write_text("existing")
 
-        response = client.post("/api/v1/recover/subtitle-folders")
+        response = client.post("/api/v1/salvage/subtitle-folders")
         self.assertEqual(response.status_code, 200)
 
         # Check metrics
@@ -2241,21 +2241,21 @@ class TestSubtitleRecovery(unittest.TestCase):
         metrics_text = metrics_response.text
 
         # Should have skip metrics
-        self.assertIn("brronson_recovery_folders_skipped_total", metrics_text)
-        self.assertIn("brronson_recovery_files_skipped_total", metrics_text)
+        self.assertIn("brronson_salvage_folders_skipped_total", metrics_text)
+        self.assertIn("brronson_salvage_files_skipped_total", metrics_text)
 
         recycled_path_resolved = normalize_path_for_metrics(self.recycled_dir)
-        recovered_path_resolved = normalize_path_for_metrics(
-            self.recovered_dir
+        salvaged_path_resolved = normalize_path_for_metrics(
+            self.salvaged_dir
         )
 
         # Check skipped folders metric (folder should be skipped because all files exist)
         assert_metric_with_labels(
             metrics_text,
-            "brronson_recovery_folders_skipped_total",
+            "brronson_salvage_folders_skipped_total",
             {
                 "recycled_directory": recycled_path_resolved,
-                "recovered_directory": recovered_path_resolved,
+                "salvaged_directory": salvaged_path_resolved,
                 "dry_run": "true",
             },
             "1.0",
@@ -2264,16 +2264,16 @@ class TestSubtitleRecovery(unittest.TestCase):
         # Check skipped files metric
         assert_metric_with_labels(
             metrics_text,
-            "brronson_recovery_files_skipped_total",
+            "brronson_salvage_files_skipped_total",
             {
                 "recycled_directory": recycled_path_resolved,
-                "recovered_directory": recovered_path_resolved,
+                "salvaged_directory": salvaged_path_resolved,
                 "dry_run": "true",
             },
             "1.0",
         )
 
-    def test_recover_subtitle_folders_batch_size(self):
+    def test_salvage_subtitle_folders_batch_size(self):
         """Test that batch_size parameter limits files copied"""
         # Create folder with many subtitle files
         folder = self.recycled_dir / "Movie1"
@@ -2283,7 +2283,7 @@ class TestSubtitleRecovery(unittest.TestCase):
 
         # Set batch_size to 5
         response = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=5"
+            "/api/v1/salvage/subtitle-folders?dry_run=false&batch_size=5"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -2293,8 +2293,8 @@ class TestSubtitleRecovery(unittest.TestCase):
         self.assertEqual(data["batch_size"], 5)
         self.assertTrue(data["batch_limit_reached"])
 
-    def test_recover_subtitle_folders_reentrant(self):
-        """Test that recovery is re-entrant - can resume from where it stopped"""
+    def test_salvage_subtitle_folders_reentrant(self):
+        """Test that salvage is re-entrant - can resume from where it stopped"""
         # Create folder with many subtitle files
         folder = self.recycled_dir / "Movie1"
         folder.mkdir()
@@ -2303,7 +2303,7 @@ class TestSubtitleRecovery(unittest.TestCase):
 
         # First request: copy 5 files
         response1 = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=5"
+            "/api/v1/salvage/subtitle-folders?dry_run=false&batch_size=5"
         )
         self.assertEqual(response1.status_code, 200)
         data1 = response1.json()
@@ -2312,7 +2312,7 @@ class TestSubtitleRecovery(unittest.TestCase):
 
         # Second request: should continue and copy remaining files
         response2 = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=5"
+            "/api/v1/salvage/subtitle-folders?dry_run=false&batch_size=5"
         )
         self.assertEqual(response2.status_code, 200)
         data2 = response2.json()
@@ -2323,7 +2323,7 @@ class TestSubtitleRecovery(unittest.TestCase):
         # Files are processed in lexicographic order, so final list will be:
         # subtitle1, subtitle10, subtitle2-9
         all_files = sorted(
-            [f.name for f in (self.recovered_dir / "Movie1").glob("*.srt")]
+            [f.name for f in (self.salvaged_dir / "Movie1").glob("*.srt")]
         )
         # When sorted lexicographically, subtitle10 comes before subtitle2
         expected_all = (
@@ -2333,7 +2333,7 @@ class TestSubtitleRecovery(unittest.TestCase):
         )
         self.assertEqual(all_files, expected_all)
 
-    def test_recover_subtitle_folders_batch_size_skips_dont_count(self):
+    def test_salvage_subtitle_folders_batch_size_skips_dont_count(self):
         """Test that skipped files don't count toward batch_size"""
         # Create folder with subtitle files
         folder = self.recycled_dir / "Movie1"
@@ -2342,14 +2342,14 @@ class TestSubtitleRecovery(unittest.TestCase):
             (folder / f"subtitle{i}.srt").touch()
 
         # Pre-create some files
-        (self.recovered_dir / "Movie1").mkdir()
-        (self.recovered_dir / "Movie1" / "subtitle2.srt").touch()
-        (self.recovered_dir / "Movie1" / "subtitle4.srt").touch()
+        (self.salvaged_dir / "Movie1").mkdir()
+        (self.salvaged_dir / "Movie1" / "subtitle2.srt").touch()
+        (self.salvaged_dir / "Movie1" / "subtitle4.srt").touch()
 
         # batch_size=5, but 2 files already exist (skipped)
         # Should copy 5 NEW files (skipped don't count)
         response = client.post(
-            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=5"
+            "/api/v1/salvage/subtitle-folders?dry_run=false&batch_size=5"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()

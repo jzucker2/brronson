@@ -85,9 +85,9 @@ def get_recycled_movies_directory():
     return os.getenv("RECYCLED_MOVIES_DIRECTORY", "/recycled/movies")
 
 
-def get_recovered_movies_directory():
-    """Get the recovered movies directory from environment variable"""
-    return os.getenv("RECOVERED_MOVIES_DIRECTORY", "/recovered/movies")
+def get_salvaged_movies_directory():
+    """Get the salvaged movies directory from environment variable"""
+    return os.getenv("SALVAGED_MOVIES_DIRECTORY", "/salvaged/movies")
 
 
 # Default patterns for common unwanted files
@@ -274,53 +274,53 @@ move_batch_operations_total = Counter(
     ["cleanup_directory", "target_directory", "batch_size", "dry_run"],
 )
 
-# Custom Prometheus metrics for subtitle recovery operations
-recovery_folders_scanned_total = Counter(
-    "brronson_recovery_folders_scanned_total",
-    "Total number of folders scanned for subtitle recovery",
+# Custom Prometheus metrics for subtitle salvage operations
+salvage_folders_scanned_total = Counter(
+    "brronson_salvage_folders_scanned_total",
+    "Total number of folders scanned for subtitle salvage",
     ["recycled_directory", "dry_run"],
 )
 
-recovery_folders_with_subtitles_found = Gauge(
-    "brronson_recovery_folders_with_subtitles_found",
+salvage_folders_with_subtitles_found = Gauge(
+    "brronson_salvage_folders_with_subtitles_found",
     "Current number of folders found with subtitles in root",
     ["recycled_directory", "dry_run"],
 )
 
-recovery_folders_copied_total = Counter(
-    "brronson_recovery_folders_copied_total",
-    "Total number of folders successfully copied during recovery",
-    ["recycled_directory", "recovered_directory", "dry_run"],
+salvage_folders_copied_total = Counter(
+    "brronson_salvage_folders_copied_total",
+    "Total number of folders successfully copied during salvage",
+    ["recycled_directory", "salvaged_directory", "dry_run"],
 )
 
-recovery_subtitle_files_copied_total = Counter(
-    "brronson_recovery_subtitle_files_copied_total",
-    "Total number of subtitle files copied during recovery",
-    ["recycled_directory", "recovered_directory", "dry_run"],
+salvage_subtitle_files_copied_total = Counter(
+    "brronson_salvage_subtitle_files_copied_total",
+    "Total number of subtitle files copied during salvage",
+    ["recycled_directory", "salvaged_directory", "dry_run"],
 )
 
-recovery_folders_skipped_total = Counter(
-    "brronson_recovery_folders_skipped_total",
-    "Total number of folders skipped during recovery (target already exists)",
-    ["recycled_directory", "recovered_directory", "dry_run"],
+salvage_folders_skipped_total = Counter(
+    "brronson_salvage_folders_skipped_total",
+    "Total number of folders skipped during salvage (target already exists)",
+    ["recycled_directory", "salvaged_directory", "dry_run"],
 )
 
-recovery_files_skipped_total = Counter(
-    "brronson_recovery_files_skipped_total",
-    "Total number of subtitle files skipped during recovery (target already exists)",
-    ["recycled_directory", "recovered_directory", "dry_run"],
+salvage_files_skipped_total = Counter(
+    "brronson_salvage_files_skipped_total",
+    "Total number of subtitle files skipped during salvage (target already exists)",
+    ["recycled_directory", "salvaged_directory", "dry_run"],
 )
 
-recovery_errors_total = Counter(
-    "brronson_recovery_errors_total",
-    "Total number of errors during subtitle recovery operations",
-    ["recycled_directory", "recovered_directory", "error_type"],
+salvage_errors_total = Counter(
+    "brronson_salvage_errors_total",
+    "Total number of errors during subtitle salvage operations",
+    ["recycled_directory", "salvaged_directory", "error_type"],
 )
 
-recovery_operation_duration = Histogram(
-    "brronson_recovery_operation_duration_seconds",
-    "Time spent on subtitle recovery operations",
-    ["operation_type", "recycled_directory", "recovered_directory"],
+salvage_operation_duration = Histogram(
+    "brronson_salvage_operation_duration_seconds",
+    "Time spent on subtitle salvage operations",
+    ["operation_type", "recycled_directory", "salvaged_directory"],
 )
 
 brronson_info = Gauge("brronson_info", "Info about the server", ["version"])
@@ -337,7 +337,7 @@ def validate_directory(
     Args:
         directory_path: Path to the directory to validate
         cleanup_dir: String representation of the cleanup directory for error messages  # noqa: E501
-        operation_type: Type of operation ("scan", "cleanup", "comparison", or "recovery") for metrics
+        operation_type: Type of operation ("scan", "cleanup", "comparison", or "salvage") for metrics
 
     Raises:
         HTTPException: If directory validation fails
@@ -355,13 +355,13 @@ def validate_directory(
             comparison_errors_total.labels(
                 directory=cleanup_dir, error_type="directory_not_found"
             ).inc()
-        elif operation_type == "recovery":
-            # For recovery operations, we need to determine which directory failed
+        elif operation_type == "salvage":
+            # For salvage operations, we need to determine which directory failed
             # Use resolved path comparison to avoid substring false positives
             recycled_dir = get_recycled_movies_directory()
-            recovered_dir = get_recovered_movies_directory()
+            salvaged_dir = get_salvaged_movies_directory()
             recycled_path_resolved = str(Path(recycled_dir).resolve())
-            recovered_path_resolved = str(Path(recovered_dir).resolve())
+            salvaged_path_resolved = str(Path(salvaged_dir).resolve())
             dir_str_resolved = str(directory_path.resolve())
 
             # Determine which directory this is using exact path comparison
@@ -369,25 +369,25 @@ def validate_directory(
                 dir_str_resolved == recycled_path_resolved
                 or dir_str_resolved.startswith(recycled_path_resolved + "/")
             ):
-                recovery_errors_total.labels(
+                salvage_errors_total.labels(
                     recycled_directory=recycled_dir,
-                    recovered_directory=recovered_dir,
+                    salvaged_directory=salvaged_dir,
                     error_type="recycled_directory_not_found",
                 ).inc()
             elif (
-                dir_str_resolved == recovered_path_resolved
-                or dir_str_resolved.startswith(recovered_path_resolved + "/")
+                dir_str_resolved == salvaged_path_resolved
+                or dir_str_resolved.startswith(salvaged_path_resolved + "/")
             ):
-                recovery_errors_total.labels(
+                salvage_errors_total.labels(
                     recycled_directory=recycled_dir,
-                    recovered_directory=recovered_dir,
-                    error_type="recovered_directory_not_found",
+                    salvaged_directory=salvaged_dir,
+                    error_type="salvaged_directory_not_found",
                 ).inc()
             else:
                 # Fallback: if we can't determine, use a generic error type
-                recovery_errors_total.labels(
+                salvage_errors_total.labels(
                     recycled_directory=recycled_dir,
-                    recovered_directory=recovered_dir,
+                    salvaged_directory=salvaged_dir,
                     error_type="directory_not_found",
                 ).inc()
         raise HTTPException(
@@ -423,12 +423,12 @@ def validate_directory(
                 sys_dir_path + "/"
             ):  # noqa: E501
                 # Record error in appropriate metric based on operation type
-                if operation_type == "recovery":
+                if operation_type == "salvage":
                     recycled_dir = get_recycled_movies_directory()
-                    recovered_dir = get_recovered_movies_directory()
-                    recovery_errors_total.labels(
+                    salvaged_dir = get_salvaged_movies_directory()
+                    salvage_errors_total.labels(
                         recycled_directory=recycled_dir,
-                        recovered_directory=recovered_dir,
+                        salvaged_directory=salvaged_dir,
                         error_type="protected_system_location",
                     ).inc()
                 raise HTTPException(
@@ -1237,15 +1237,15 @@ async def move_non_duplicate_files(
         )
 
 
-@app.post("/api/v1/recover/subtitle-folders")
-async def recover_subtitle_folders(
+@app.post("/api/v1/salvage/subtitle-folders")
+async def salvage_subtitle_folders(
     dry_run: bool = True,
     batch_size: int = 100,
     subtitle_extensions: Optional[List[str]] = Body(None),
 ):
     """
     Traverse the recycled movies directory and copy folders that have subtitles
-    in the root to the recovered movies directory.
+    in the root to the salvaged movies directory.
 
     This function:
     - Scans all folders in the recycled movies directory
@@ -1265,7 +1265,7 @@ async def recover_subtitle_folders(
                             If None, uses DEFAULT_SUBTITLE_EXTENSIONS
 
     Returns:
-        dict: Recovery results including folders found, copied, and errors
+        dict: Salvage results including folders found, copied, and errors
     """
     start_time = time.time()
 
@@ -1277,24 +1277,24 @@ async def recover_subtitle_folders(
         )
 
     recycled_dir = get_recycled_movies_directory()
-    recovered_dir = get_recovered_movies_directory()
+    salvaged_dir = get_salvaged_movies_directory()
 
     if subtitle_extensions is None:
         subtitle_extensions = DEFAULT_SUBTITLE_EXTENSIONS
 
     try:
         recycled_path = Path(recycled_dir).resolve()
-        recovered_path = Path(recovered_dir).resolve()
+        salvaged_path = Path(salvaged_dir).resolve()
 
         # Validate both directories
-        validate_directory(recycled_path, recycled_dir, "recovery")
-        validate_directory(recovered_path, recovered_dir, "recovery")
+        validate_directory(recycled_path, recycled_dir, "salvage")
+        validate_directory(salvaged_path, salvaged_dir, "salvage")
 
-        # Ensure recovered directory exists
-        recovered_path.mkdir(parents=True, exist_ok=True)
+        # Ensure salvaged directory exists
+        salvaged_path.mkdir(parents=True, exist_ok=True)
 
         logger.info(
-            f"Subtitle recovery: Scanning {recycled_path} for folders with subtitles"
+            f"Subtitle salvage: Scanning {recycled_path} for folders with subtitles"
         )
 
         # Get all subdirectories in recycled directory
@@ -1304,9 +1304,9 @@ async def recover_subtitle_folders(
                 if item.is_dir():
                     folders_to_check.append(item)
         except Exception as e:
-            recovery_errors_total.labels(
+            salvage_errors_total.labels(
                 recycled_directory=recycled_dir,
-                recovered_directory=recovered_dir,
+                salvaged_directory=salvaged_dir,
                 error_type="directory_read_error",
             ).inc()
             raise HTTPException(
@@ -1315,7 +1315,7 @@ async def recover_subtitle_folders(
             )
 
         # Record metric for folders scanned
-        recovery_folders_scanned_total.labels(
+        salvage_folders_scanned_total.labels(
             recycled_directory=recycled_dir, dry_run=str(dry_run).lower()
         ).inc(len(folders_to_check))
 
@@ -1330,7 +1330,7 @@ async def recover_subtitle_folders(
         )
 
         # Record metric for folders with subtitles found
-        recovery_folders_with_subtitles_found.labels(
+        salvage_folders_with_subtitles_found.labels(
             recycled_directory=recycled_dir, dry_run=str(dry_run).lower()
         ).set(len(folders_with_subtitles))
 
@@ -1356,7 +1356,7 @@ async def recover_subtitle_folders(
                 break
 
             folder_name = folder_path.name
-            target_folder_path = recovered_path / folder_name
+            target_folder_path = salvaged_path / folder_name
 
             # Track files copied/skipped for this folder
             folder_files_copied = 0
@@ -1415,9 +1415,9 @@ async def recover_subtitle_folders(
                                     )
                                     folder_files_skipped += 1
                                     subtitle_files_skipped += 1
-                                    recovery_files_skipped_total.labels(
+                                    salvage_files_skipped_total.labels(
                                         recycled_directory=recycled_dir,
-                                        recovered_directory=recovered_dir,
+                                        salvaged_directory=salvaged_dir,
                                         dry_run=str(dry_run).lower(),
                                     ).inc()
                                 else:
@@ -1446,9 +1446,9 @@ async def recover_subtitle_folders(
                         logger.info(
                             f"Successfully finished copying folder: {folder_name} ({folder_files_copied} files copied, {folder_files_skipped} files skipped)"
                         )
-                        recovery_folders_copied_total.labels(
+                        salvage_folders_copied_total.labels(
                             recycled_directory=recycled_dir,
-                            recovered_directory=recovered_dir,
+                            salvaged_directory=salvaged_dir,
                             dry_run=str(dry_run).lower(),
                         ).inc()
                     elif folder_files_skipped > 0:
@@ -1457,9 +1457,9 @@ async def recover_subtitle_folders(
                         logger.info(
                             f"Folder {folder_name} skipped - all files already exist ({folder_files_skipped} files skipped)"
                         )
-                        recovery_folders_skipped_total.labels(
+                        salvage_folders_skipped_total.labels(
                             recycled_directory=recycled_dir,
-                            recovered_directory=recovered_dir,
+                            salvaged_directory=salvaged_dir,
                             dry_run=str(dry_run).lower(),
                         ).inc()
                     else:
@@ -1474,9 +1474,9 @@ async def recover_subtitle_folders(
                     )
                     logger.error(error_msg)
                     errors.append(error_msg)
-                    recovery_errors_total.labels(
+                    salvage_errors_total.labels(
                         recycled_directory=recycled_dir,
-                        recovered_directory=recovered_dir,
+                        salvaged_directory=salvaged_dir,
                         error_type="folder_copy_error",
                     ).inc()
 
@@ -1524,9 +1524,9 @@ async def recover_subtitle_folders(
                                 if target_file.exists():
                                     folder_files_skipped += 1
                                     subtitle_files_skipped += 1
-                                    recovery_files_skipped_total.labels(
+                                    salvage_files_skipped_total.labels(
                                         recycled_directory=recycled_dir,
-                                        recovered_directory=recovered_dir,
+                                        salvaged_directory=salvaged_dir,
                                         dry_run=str(dry_run).lower(),
                                     ).inc()
                                 else:
@@ -1539,16 +1539,16 @@ async def recover_subtitle_folders(
                     # Determine if folder would be copied or skipped
                     if folder_files_copied > 0:
                         copied_folders.append(folder_name)
-                        recovery_folders_copied_total.labels(
+                        salvage_folders_copied_total.labels(
                             recycled_directory=recycled_dir,
-                            recovered_directory=recovered_dir,
+                            salvaged_directory=salvaged_dir,
                             dry_run=str(dry_run).lower(),
                         ).inc()
                     elif folder_files_skipped > 0:
                         skipped_folders.append(folder_name)
-                        recovery_folders_skipped_total.labels(
+                        salvage_folders_skipped_total.labels(
                             recycled_directory=recycled_dir,
-                            recovered_directory=recovered_dir,
+                            salvaged_directory=salvaged_dir,
                             dry_run=str(dry_run).lower(),
                         ).inc()
                     else:
@@ -1561,31 +1561,31 @@ async def recover_subtitle_folders(
                     error_msg = f"DRY RUN: Failed to process folder {folder_name}: {str(e)}"
                     logger.error(error_msg)
                     errors.append(error_msg)
-                    recovery_errors_total.labels(
+                    salvage_errors_total.labels(
                         recycled_directory=recycled_dir,
-                        recovered_directory=recovered_dir,
+                        salvaged_directory=salvaged_dir,
                         error_type="folder_copy_error",
                     ).inc()
 
         # Record metrics for subtitle files copied and skipped
         if subtitle_files_copied > 0:
-            recovery_subtitle_files_copied_total.labels(
+            salvage_subtitle_files_copied_total.labels(
                 recycled_directory=recycled_dir,
-                recovered_directory=recovered_dir,
+                salvaged_directory=salvaged_dir,
                 dry_run=str(dry_run).lower(),
             ).inc(subtitle_files_copied)
 
         # Record operation duration
         operation_duration = time.time() - start_time
-        recovery_operation_duration.labels(
-            operation_type="recover_subtitle_folders",
+        salvage_operation_duration.labels(
+            operation_type="salvage_subtitle_folders",
             recycled_directory=recycled_dir,
-            recovered_directory=recovered_dir,
+            salvaged_directory=salvaged_dir,
         ).observe(operation_duration)
 
         response = {
             "recycled_directory": str(recycled_path),
-            "recovered_directory": str(recovered_path),
+            "salvaged_directory": str(salvaged_path),
             "dry_run": dry_run,
             "batch_size": batch_size,
             "subtitle_extensions": subtitle_extensions,
@@ -1609,14 +1609,14 @@ async def recover_subtitle_folders(
         # Re-raise HTTPExceptions (like 404 for missing directories) as-is
         raise
     except Exception as e:
-        recovery_errors_total.labels(
+        salvage_errors_total.labels(
             recycled_directory=recycled_dir,
-            recovered_directory=recovered_dir,
+            salvaged_directory=salvaged_dir,
             error_type="operation_error",
         ).inc()
         raise HTTPException(
             status_code=500,
-            detail=f"Error during subtitle recovery operation: {str(e)}",
+            detail=f"Error during subtitle salvage operation: {str(e)}",
         )
 
 
