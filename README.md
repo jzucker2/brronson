@@ -339,6 +339,13 @@ curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=fals
   -d '[".srt", ".sub", ".vtt", ".custom"]'
 ```
 
+**Use batch_size for re-entrant operations:**
+
+```bash
+# Copy up to 50 files per request (skipped files don't count)
+curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=false&batch_size=50"
+```
+
 **Response format:**
 
 ```json
@@ -346,6 +353,7 @@ curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=fals
   "recycled_directory": "/path/to/recycled/movies",
   "recovered_directory": "/path/to/recovered/movies",
   "dry_run": true,
+  "batch_size": 100,
   "subtitle_extensions": [".srt", ".sub", ".vtt", ".ass", ".ssa", ".idx", ".sup", ".scc", ".ttml", ".dfxp", ".mcc", ".stl", ".sbv", ".smi", ".txt"],
   "folders_scanned": 5,
   "folders_with_subtitles_found": 2,
@@ -353,6 +361,7 @@ curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=fals
   "folders_skipped": 0,
   "subtitle_files_copied": 4,
   "subtitle_files_skipped": 0,
+  "batch_limit_reached": false,
   "errors": 0,
   "folders_with_subtitles": ["Movie1", "Movie2"],
   "copied_folders": ["Movie1", "Movie2"],
@@ -370,6 +379,8 @@ curl -X POST "http://localhost:1968/api/v1/recover/subtitle-folders?dry_run=fals
 - **Custom Extensions**: Allows custom subtitle file extensions to be specified
 - **Safe by Default**: Default `dry_run=true` prevents accidental copies
 - **Skip Existing**: Does not overwrite existing destination folders or files (skips them instead)
+- **Batch Processing**: `batch_size` parameter limits files copied per request (default: 100), making operations re-entrant
+- **Re-entrant**: Skipped files don't count toward batch_size, allowing safe resumption of interrupted operations
 - **Error Handling**: Comprehensive error reporting for failed operations
 - **Prometheus Metrics**: Records recovery operations including skipped items for monitoring
 

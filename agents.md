@@ -351,6 +351,8 @@ When adding new API endpoints:
 6. **Error Handling**: Implement proper error handling
 7. **Validation**: Validate all inputs
 8. **Skip Existing**: For copy/move operations, skip existing destination files/folders rather than overwriting (log skipped items in response and metrics)
+9. **Batch Size**: For copy/move operations, implement `batch_size` parameter that limits items processed per request. Only count actually copied/moved items toward the limit (not skipped items), making operations re-entrant
+10. **Re-entrancy**: Ensure operations can be safely resumed by subsequent requests - skipped items should not count toward batch limits
 
 ## Checklist for Agents
 

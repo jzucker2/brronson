@@ -1240,6 +1240,7 @@ async def move_non_duplicate_files(
 @app.post("/api/v1/recover/subtitle-folders")
 async def recover_subtitle_folders(
     dry_run: bool = True,
+    batch_size: int = 100,
     subtitle_extensions: Optional[List[str]] = Body(None),
 ):
     """
@@ -1256,6 +1257,10 @@ async def recover_subtitle_folders(
 
     Args:
         dry_run: If True, only show what would be copied (default: True)
+        batch_size: Maximum number of subtitle files to copy per request (default: 100).
+                   Only counts files actually copied, not skipped files. This makes the
+                   operation re-entrant - subsequent requests will continue from where
+                   the previous request stopped.
         subtitle_extensions: List of subtitle file extensions (with leading dot).
                             If None, uses DEFAULT_SUBTITLE_EXTENSIONS
 
@@ -1327,9 +1332,22 @@ async def recover_subtitle_folders(
         subtitle_files_copied = 0
         subtitle_files_skipped = 0
         errors = []
+        files_copied_this_batch = 0  # Track files copied for batch_size limit
+        batch_limit_hit = (
+            False  # Track if we actually hit the batch limit (stopped early)
+        )
 
         # Process each folder with subtitles
         for folder_path in folders_with_subtitles:
+            # Check if we've reached the batch size limit before processing folder
+            if files_copied_this_batch >= batch_size:
+                batch_limit_hit = True
+                logger.info(
+                    f"Batch size limit reached ({batch_size} files copied), "
+                    f"stopping processing. {len(folders_with_subtitles) - len(copied_folders) - len(skipped_folders)} folders remaining."
+                )
+                break
+
             folder_name = folder_path.name
             target_folder_path = recovered_path / folder_name
 
@@ -1338,19 +1356,29 @@ async def recover_subtitle_folders(
             folder_files_skipped = 0
 
             if not dry_run:
+                # Check if target folder already existed before we start
+                target_existed_before = target_folder_path.exists()
                 target_created = False
                 try:
                     logger.info(
                         f"Starting to copy folder: {folder_name} from {folder_path} to {target_folder_path}"
                     )
 
-                    # Create target folder
+                    # Create target folder (only mark as created if it didn't exist)
                     target_folder_path.mkdir(parents=True, exist_ok=True)
-                    target_created = True
+                    if not target_existed_before:
+                        target_created = True
 
                     # Copy folder structure and subtitle files only
                     # Walk through the source folder
+                    batch_limit_reached = False
                     for root, dirs, files in os.walk(folder_path):
+                        # Check batch limit before processing more files
+                        if files_copied_this_batch >= batch_size:
+                            batch_limit_reached = True
+                            batch_limit_hit = True
+                            break
+
                         # Calculate relative path from source folder
                         rel_path = Path(root).relative_to(folder_path)
                         target_dir = target_folder_path / rel_path
@@ -1359,7 +1387,13 @@ async def recover_subtitle_folders(
                         target_dir.mkdir(parents=True, exist_ok=True)
 
                         # Copy files: only subtitle files, skip everything else
-                        for file in files:
+                        # Sort files to ensure consistent processing order
+                        for file in sorted(files):
+                            # Check batch limit before processing each file
+                            if files_copied_this_batch >= batch_size:
+                                batch_limit_reached = True
+                                batch_limit_hit = True
+                                break
                             source_file = Path(root) / file
                             target_file = target_dir / file
 
@@ -1385,6 +1419,7 @@ async def recover_subtitle_folders(
                                     )
                                     folder_files_copied += 1
                                     subtitle_files_copied += 1
+                                    files_copied_this_batch += 1
                                     logger.debug(
                                         f"Copied subtitle file: {source_file.name} to {target_file}"
                                     )
@@ -1393,6 +1428,10 @@ async def recover_subtitle_folders(
                                 logger.debug(
                                     f"Skipping non-subtitle file: {source_file.name}"
                                 )
+
+                        # Break out of directory walk if batch limit reached
+                        if batch_limit_reached:
+                            break
 
                     # Determine if folder should be counted as copied or skipped
                     if folder_files_copied > 0:
@@ -1455,10 +1494,20 @@ async def recover_subtitle_folders(
                 )
 
                 # Count subtitle files that would be copied (checking if they exist)
+                batch_limit_reached = False
                 for root, dirs, files in os.walk(folder_path):
+                    if files_copied_this_batch >= batch_size:
+                        batch_limit_reached = True
+                        batch_limit_hit = True
+                        break
                     rel_path = Path(root).relative_to(folder_path)
                     target_dir = target_folder_path / rel_path
-                    for file in files:
+                    # Sort files to ensure consistent processing order
+                    for file in sorted(files):
+                        if files_copied_this_batch >= batch_size:
+                            batch_limit_reached = True
+                            batch_limit_hit = True
+                            break
                         source_file = Path(root) / file
                         if is_subtitle_file(source_file, subtitle_extensions):
                             target_file = target_dir / file
@@ -1473,10 +1522,18 @@ async def recover_subtitle_folders(
                             else:
                                 folder_files_copied += 1
                                 subtitle_files_copied += 1
+                                files_copied_this_batch += 1
+                    if batch_limit_reached:
+                        break
 
                 # Determine if folder would be copied or skipped
                 if folder_files_copied > 0:
                     copied_folders.append(folder_name)
+                    recovery_folders_copied_total.labels(
+                        recycled_directory=recycled_dir,
+                        recovered_directory=recovered_dir,
+                        dry_run=str(dry_run).lower(),
+                    ).inc()
                 elif folder_files_skipped > 0:
                     skipped_folders.append(folder_name)
                     recovery_folders_skipped_total.labels(
@@ -1505,6 +1562,7 @@ async def recover_subtitle_folders(
             "recycled_directory": str(recycled_path),
             "recovered_directory": str(recovered_path),
             "dry_run": dry_run,
+            "batch_size": batch_size,
             "subtitle_extensions": subtitle_extensions,
             "folders_scanned": len(folders_to_check),
             "folders_with_subtitles_found": len(folders_with_subtitles),
@@ -1512,6 +1570,7 @@ async def recover_subtitle_folders(
             "folders_skipped": len(skipped_folders),
             "subtitle_files_copied": subtitle_files_copied,
             "subtitle_files_skipped": subtitle_files_skipped,
+            "batch_limit_reached": batch_limit_hit,
             "errors": len(errors),
             "folders_with_subtitles": [f.name for f in folders_with_subtitles],
             "copied_folders": copied_folders,

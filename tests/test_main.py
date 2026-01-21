@@ -8,15 +8,12 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.version import version
 
+from tests.test_utils import (
+    normalize_path_for_metrics,
+    assert_metric_with_labels,
+)
+
 client = TestClient(app)
-
-
-def normalize_path_for_metrics(path):
-    """Normalize a path for Prometheus metrics label comparison (strip /private prefix if present)."""
-    p = str(path)
-    if p.startswith("/private/var/"):
-        return p[len("/private") :]
-    return p
 
 
 class TestMainEndpoints(unittest.TestCase):
@@ -2276,26 +2273,95 @@ class TestSubtitleRecovery(unittest.TestCase):
             "1.0",
         )
 
+    def test_recover_subtitle_folders_batch_size(self):
+        """Test that batch_size parameter limits files copied"""
+        # Create folder with many subtitle files
+        folder = self.recycled_dir / "Movie1"
+        folder.mkdir()
+        for i in range(1, 11):
+            (folder / f"subtitle{i}.srt").touch()
 
-def assert_metric_with_labels(metrics_text, metric_name, labels, value):
-    """
-    Assert that a Prometheus metric with the given name, labels (dict), and value exists in the metrics_text.
-    Ignores label order.
-    """
-    for line in metrics_text.splitlines():
-        if not line.startswith(metric_name + "{"):
-            continue
-        if (
-            all(f'{k}="{v}"' in line for k, v in labels.items())
-            and f"}} {value}" in line
-        ):
-            return
-    raise AssertionError(
-        f"Metric {metric_name} with labels {labels} and value {value} not found in metrics output!\nLine examples:\n"
-        + "\n".join(
-            [line for line in metrics_text.splitlines() if metric_name in line]
+        # Set batch_size to 5
+        response = client.post(
+            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=5"
         )
-    )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Should have copied exactly 5 files
+        self.assertEqual(data["subtitle_files_copied"], 5)
+        self.assertEqual(data["batch_size"], 5)
+        self.assertTrue(data["batch_limit_reached"])
+
+    def test_recover_subtitle_folders_reentrant(self):
+        """Test that recovery is re-entrant - can resume from where it stopped"""
+        # Create folder with many subtitle files
+        folder = self.recycled_dir / "Movie1"
+        folder.mkdir()
+        for i in range(1, 11):
+            (folder / f"subtitle{i}.srt").touch()
+
+        # First request: copy 5 files
+        response1 = client.post(
+            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=5"
+        )
+        self.assertEqual(response1.status_code, 200)
+        data1 = response1.json()
+        self.assertEqual(data1["subtitle_files_copied"], 5)
+        self.assertTrue(data1["batch_limit_reached"])
+
+        # Second request: should continue and copy remaining files
+        response2 = client.post(
+            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=5"
+        )
+        self.assertEqual(response2.status_code, 200)
+        data2 = response2.json()
+        self.assertEqual(data2["subtitle_files_copied"], 5)
+        self.assertFalse(data2["batch_limit_reached"])
+
+        # Verify all files are copied
+        # Files are processed in lexicographic order, so final list will be:
+        # subtitle1, subtitle10, subtitle2-9
+        all_files = sorted(
+            [f.name for f in (self.recovered_dir / "Movie1").glob("*.srt")]
+        )
+        # When sorted lexicographically, subtitle10 comes before subtitle2
+        expected_all = (
+            ["subtitle1.srt"]
+            + [f"subtitle{i}.srt" for i in range(10, 11)]
+            + [f"subtitle{i}.srt" for i in range(2, 10)]
+        )
+        self.assertEqual(all_files, expected_all)
+
+    def test_recover_subtitle_folders_batch_size_skips_dont_count(self):
+        """Test that skipped files don't count toward batch_size"""
+        # Create folder with subtitle files
+        folder = self.recycled_dir / "Movie1"
+        folder.mkdir()
+        for i in range(1, 11):
+            (folder / f"subtitle{i}.srt").touch()
+
+        # Pre-create some files
+        (self.recovered_dir / "Movie1").mkdir()
+        (self.recovered_dir / "Movie1" / "subtitle2.srt").touch()
+        (self.recovered_dir / "Movie1" / "subtitle4.srt").touch()
+
+        # batch_size=5, but 2 files already exist (skipped)
+        # Should copy 5 NEW files (skipped don't count)
+        response = client.post(
+            "/api/v1/recover/subtitle-folders?dry_run=false&batch_size=5"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Should have copied 5 files
+        # Note: Files are processed in sorted order, so subtitle2 and subtitle4
+        # will be encountered in order. Since subtitle2 exists, it's skipped.
+        # With batch_size=5, we copy 5 files and skip at least 1 (subtitle2).
+        # subtitle4 might not be encountered if batch limit is reached first.
+        self.assertEqual(data["subtitle_files_copied"], 5)
+        self.assertGreaterEqual(data["subtitle_files_skipped"], 1)
+        self.assertTrue(data["batch_limit_reached"])
 
 
 if __name__ == "__main__":
