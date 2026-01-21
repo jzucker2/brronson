@@ -29,10 +29,12 @@ Agents should ensure pre-commit hooks are installed and run before committing:
 
 ```bash
 # Install pre-commit hooks (first time only)
-pre-commit install
+make pre-commit-install
+# Or: pre-commit install
 
 # Run pre-commit hooks manually on all files
-pre-commit run --all-files
+make pre-commit-run
+# Or: pre-commit run --all-files
 
 # Run pre-commit hooks on staged files (automatic on commit)
 pre-commit run
@@ -41,10 +43,11 @@ pre-commit run
 ### Pre-commit Hook Requirements
 
 **Agents MUST:**
-1. Ensure all code passes pre-commit hooks before committing
-2. Fix any issues reported by pre-commit hooks
-3. Run `pre-commit run --all-files` before finalizing changes
-4. Never skip pre-commit hooks unless explicitly requested by the user
+1. Run `make check` before running pre-commit hooks
+2. Ensure all code passes pre-commit hooks before committing
+3. Fix any issues reported by pre-commit hooks
+4. Run `make pre-commit-run` or `pre-commit run --all-files` before finalizing changes
+5. Never skip pre-commit hooks unless explicitly requested by the user
 
 ## Linting Requirements
 
@@ -65,14 +68,17 @@ The project follows **PEP 8** Python style guidelines with the following specifi
 All Python code **MUST** be formatted with Black:
 
 ```bash
-# Format all Python files
-black .
+# Format all Python files (recommended: use make)
+make format
+
+# Or format directly with black
+black app/ tests/ --line-length=79
 
 # Format specific file
 black app/main.py
 
 # Check formatting without making changes
-black --check .
+black --check app/ tests/
 ```
 
 **Black Configuration:**
@@ -84,8 +90,14 @@ black --check .
 All Python code **MUST** pass Flake8 linting:
 
 ```bash
-# Lint all Python files
-flake8 .
+# Lint all Python files (checks only, doesn't fix)
+make lint
+
+# Auto-fix linting issues where possible
+make lint-fix
+
+# Or lint directly with flake8
+flake8 app/ tests/
 
 # Lint specific file
 flake8 app/main.py
@@ -98,17 +110,46 @@ flake8 app/main.py
 - Unused imports
 - Complex code warnings
 
+### Make Check Command
+
+The project provides a convenient `make check` command that runs both formatting and linting:
+
+```bash
+# Run format and lint checks
+make check
+```
+
+This command:
+1. Runs `make format` (formats code with Black)
+2. Runs `make lint` (lints code with Flake8 - checks only)
+
+**If `make check` reports linting errors, agents should run `make lint-fix` to auto-fix issues where possible.**
+
+### Make Lint-Fix Command
+
+The `make lint-fix` command attempts to automatically fix linting issues:
+
+```bash
+# Auto-fix linting issues
+make lint-fix
+```
+
+This command:
+1. Runs `black` to format code
+2. Runs `autopep8` to fix PEP 8 violations automatically
+
+**Agents MUST run `make check` before committing code, and if linting errors remain, run `make lint-fix` to attempt auto-fixes.**
+
 ### Linting Rules
 
 **Agents MUST:**
-1. Run `black` to format code before committing
-2. Run `flake8` to check for linting errors
-3. Fix all linting errors before committing
-4. Ensure code follows PEP 8 guidelines
-5. Use meaningful variable and function names
-6. Add docstrings to all functions and classes
-7. Keep functions focused and single-purpose
-8. Avoid overly complex code (use helper functions)
+1. Run `make check` to format and lint code before committing
+2. Fix all linting errors before committing
+3. Ensure code follows PEP 8 guidelines
+4. Use meaningful variable and function names
+5. Add docstrings to all functions and classes
+6. Keep functions focused and single-purpose
+7. Avoid overly complex code (use helper functions)
 
 ## Code Quality Standards
 
@@ -126,6 +167,8 @@ flake8 app/main.py
 - **Test Organization**: Group related tests in test classes
 - **Test Data**: Use temporary directories for file system tests
 - **Test Cleanup**: Always clean up test data in `tearDown` methods
+- **Running Tests**: Always run `make test` before committing to ensure all tests pass
+- **Test Failures**: Never commit code if tests fail - fix the code or tests first
 
 ### Error Handling
 
@@ -167,6 +210,47 @@ brronson/
 - **Constants**: Define constants at the module level
 - **Metrics**: Define Prometheus metrics after constants, before routes
 
+## Makefile Commands
+
+The project provides convenient Makefile commands for common tasks:
+
+```bash
+# Format and lint code (MUST run before committing)
+make check
+
+# Auto-fix linting issues where possible
+make lint-fix
+
+# Format code with Black
+make format
+
+# Lint code with Flake8 (checks only)
+make lint
+
+# Run tests
+make test
+
+# Run tests with coverage
+make test-coverage
+
+# Install pre-commit hooks
+make pre-commit-install
+
+# Run pre-commit hooks on all files
+make pre-commit-run
+
+# Run unit tests
+make test
+
+# Run tests with coverage
+make test-coverage
+
+# Run all CI checks (pre-commit + tests)
+make ci-check
+```
+
+**Agents MUST use `make check` as part of their workflow before committing.**
+
 ## Agent Workflow
 
 ### Before Making Changes
@@ -179,29 +263,33 @@ brronson/
 
 1. **Follow Patterns**: Match existing code style and patterns
 2. **Write Tests**: Create tests alongside implementation
-3. **Run Linters**: Frequently run Black and Flake8
-4. **Check Tests**: Run tests to ensure nothing breaks
+3. **Run Make Check**: Frequently run `make check` to format and lint code
+4. **Run Tests**: Frequently run `make test` to ensure tests pass
+5. **Fix Issues**: Address any test failures or linting errors immediately
 
 ### Before Committing
 
-1. **Format Code**: Run `black .` to format all code
-2. **Lint Code**: Run `flake8 .` to check for errors
-3. **Run Tests**: Execute `pytest` to verify all tests pass
-4. **Run Pre-commit**: Execute `pre-commit run --all-files`
-5. **Update Docs**: Update README.md if adding new features
-6. **Review Changes**: Review all changes before committing
+1. **Run Make Check**: Execute `make check` to format and lint code (runs `format` and `lint` targets)
+2. **Fix Linting Issues**: If linting errors are found, run `make lint-fix` to auto-fix issues where possible
+3. **Re-run Make Check**: Run `make check` again to verify all issues are resolved
+4. **Run Tests**: Execute `make test` to run unit tests and ensure they pass
+5. **Run Pre-commit**: Execute `pre-commit run --all-files` or `make pre-commit-run`
+6. **Update Docs**: Update README.md if adding new features
+7. **Review Changes**: Review all changes before committing
+
+**Note**: The `make check` command runs both formatting (Black) and linting (Flake8) in sequence. If linting errors remain after formatting, use `make lint-fix` to attempt automatic fixes before manually addressing any remaining issues. **All tests MUST pass before committing.**
 
 ## Common Issues and Solutions
 
 ### Black Formatting Issues
 
 **Problem**: Code doesn't match Black's formatting
-**Solution**: Run `black .` to auto-format code
+**Solution**: Run `make format` or `black app/ tests/ --line-length=79` to auto-format code
 
 ### Flake8 Line Length Issues
 
 **Problem**: Lines exceed 79 characters
-**Solution**: Break long lines or use Black to auto-format
+**Solution**: Run `make lint-fix` to auto-fix, or manually break long lines
 
 ### Import Order Issues
 
@@ -217,9 +305,11 @@ brronson/
 
 **Problem**: Tests fail after changes
 **Solution**:
-1. Review test output for specific failures
-2. Ensure test data is properly set up
-3. Check that environment variables are correctly set in tests
+1. Run `make test` to see detailed test output
+2. Review test output for specific failures
+3. Ensure test data is properly set up
+4. Check that environment variables are correctly set in tests
+5. Fix the code or tests to make all tests pass before committing
 
 ## Environment Variables
 
@@ -256,10 +346,12 @@ When adding new API endpoints:
 
 Before submitting code, ensure:
 
+- [ ] `make check` passes (formats and lints code)
+- [ ] `make lint-fix` has been run if linting errors were found
 - [ ] All code is formatted with Black
 - [ ] All code passes Flake8 linting
-- [ ] All pre-commit hooks pass
-- [ ] All tests pass
+- [ ] `make test` passes (all unit tests must pass)
+- [ ] All pre-commit hooks pass (`make pre-commit-run`)
 - [ ] New features have tests
 - [ ] Documentation is updated (README.md)
 - [ ] Prometheus metrics are added (if applicable)
@@ -280,15 +372,20 @@ Before submitting code, ensure:
 ## Summary
 
 Agents working on this project must:
-1. **Always** run pre-commit hooks before committing
-2. **Always** format code with Black
-3. **Always** lint code with Flake8
-4. **Always** write tests for new features
-5. **Always** update documentation
-6. **Always** follow project patterns and conventions
-7. **Never** skip pre-commit hooks
-8. **Never** commit code that doesn't pass linting
-9. **Never** commit code without tests
-10. **Never** hardcode paths or configuration values
+1. **Always** run `make check` before committing (formats and lints code)
+2. **Always** run `make lint-fix` if linting errors are found after `make check`
+3. **Always** run `make test` before committing (all unit tests must pass)
+4. **Always** run pre-commit hooks before committing (`make pre-commit-run`)
+5. **Always** format code with Black (via `make format` or `make check`)
+6. **Always** lint code with Flake8 (via `make lint` or `make check`)
+7. **Always** write tests for new features
+8. **Always** update documentation
+9. **Always** follow project patterns and conventions
+10. **Never** skip pre-commit hooks
+11. **Never** commit code that doesn't pass `make check`
+12. **Never** commit code that doesn't pass linting
+13. **Never** commit code if tests fail (`make test` must pass)
+14. **Never** commit code without tests
+15. **Never** hardcode paths or configuration values
 
 By following these guidelines, agents ensure code quality, maintainability, and consistency across the project.

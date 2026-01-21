@@ -8,13 +8,14 @@ build: ## Build the Docker image
 	docker build -t brronson .
 
 run: ## Run the application locally
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 1968
+	venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 1968
 
 test: ## Run tests
-	pytest -v
+	@test -d venv || (echo "Error: venv not found. Run 'python3 -m venv venv' first." && exit 1)
+	venv/bin/python -m pytest -v
 
 test-coverage: ## Run tests with coverage
-	pytest --cov=app --cov-report=html
+	venv/bin/python -m pytest --cov=app --cov-report=html
 
 clean: ## Clean up generated files
 	find . -type f -name "*.pyc" -delete
@@ -39,26 +40,28 @@ docker-clean: ## Clean up Docker resources
 	docker system prune -f
 
 install: ## Install Python dependencies
-	pip install -r requirements.txt
+	venv/bin/pip install -r requirements.txt
 
 install-dev: ## Install development dependencies
-	pip install -r requirements-dev.txt
+	venv/bin/pip install -r requirements-dev.txt
 
 test-docker: ## Run tests in Docker container
 	docker build -t brronson .
-	docker run --rm brronson pytest
+	docker run --rm brronson python3 -m pytest
 
 format: ## Format code with black
-	black app/ tests/ --line-length=79
+	@test -d venv || (echo "Error: venv not found. Run 'python3 -m venv venv' first." && exit 1)
+	venv/bin/python -m black app/ tests/ --line-length=79
 
 lint: ## Lint code with flake8
-	flake8 app/ tests/
+	@test -d venv || (echo "Error: venv not found. Run 'python3 -m venv venv' first." && exit 1)
+	venv/bin/python -m flake8 app/ tests/
 
 check: format lint ## Run all checks (format, lint)
 
 lint-fix: ## Auto-fix linting issues where possible
-	black app/ tests/ --line-length=79
-	autopep8 --in-place --recursive --aggressive --aggressive app/ tests/
+	venv/bin/python -m black app/ tests/ --line-length=79
+	venv/bin/python -m autopep8 --in-place --recursive --aggressive --aggressive app/ tests/
 
 pre-commit-install: ## Install pre-commit hooks
 	pre-commit install

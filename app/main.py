@@ -78,6 +78,7 @@ def get_target_directory():
     """Get the target directory from environment variable"""
     return os.getenv("TARGET_DIRECTORY", "/target")
 
+
 def get_recycled_movies_directory():
     """Get the recycled movies directory from environment variable"""
     return os.getenv("RECYCLED_MOVIES_DIRECTORY", "/recycled/movies")
@@ -500,7 +501,9 @@ def is_subtitle_file(file_path: Path, subtitle_extensions: List[str]) -> bool:
     Returns:
         True if file is a subtitle file, False otherwise
     """
-    return file_path.suffix.lower() in [ext.lower() for ext in subtitle_extensions]
+    return file_path.suffix.lower() in [
+        ext.lower() for ext in subtitle_extensions
+    ]
 
 
 def is_media_file(file_path: Path) -> bool:
@@ -1185,22 +1188,23 @@ async def recover_subtitle_folders(
     subtitle_extensions: Optional[List[str]] = Body(None),
 ):
     """
-    Traverse the recycled movies directory and move folders that have subtitles
+    Traverse the recycled movies directory and copy folders that have subtitles
     in the root to the recovered movies directory.
 
     This function:
     - Scans all folders in the recycled movies directory
     - Identifies folders that contain subtitle files in their root
-    - Moves only the folder structure and subtitle files (not media files or images)
-    - Preserves the folder structure during the move
+    - Copies only subtitle files (not media files, images, or any other files)
+    - Preserves the folder structure during the copy
+    - Leaves the original files in the recycled directory unchanged
 
     Args:
-        dry_run: If True, only show what would be moved (default: True)
+        dry_run: If True, only show what would be copied (default: True)
         subtitle_extensions: List of subtitle file extensions (with leading dot).
                             If None, uses DEFAULT_SUBTITLE_EXTENSIONS
 
     Returns:
-        dict: Recovery results including folders found, moved, and errors
+        dict: Recovery results including folders found, copied, and errors
     """
     start_time = time.time()
 
@@ -1262,8 +1266,8 @@ async def recover_subtitle_folders(
             recycled_directory=recycled_dir, dry_run=str(dry_run).lower()
         ).set(len(folders_with_subtitles))
 
-        moved_folders = []
-        subtitle_files_moved = 0
+        copied_folders = []
+        subtitle_files_copied = 0
         errors = []
 
         # Process each folder with subtitles
@@ -1275,9 +1279,7 @@ async def recover_subtitle_folders(
                 try:
                     # Check if target folder already exists
                     if target_folder_path.exists():
-                        error_msg = (
-                            f"Target folder {target_folder_path} already exists"
-                        )
+                        error_msg = f"Target folder {target_folder_path} already exists"
                         logger.warning(error_msg)
                         errors.append(error_msg)
                         recovery_errors_total.labels(
@@ -1288,13 +1290,13 @@ async def recover_subtitle_folders(
                         continue
 
                     logger.info(
-                        f"Starting to move folder: {folder_name} from {folder_path} to {target_folder_path}"
+                        f"Starting to copy folder: {folder_name} from {folder_path} to {target_folder_path}"
                     )
 
                     # Create target folder
                     target_folder_path.mkdir(parents=True, exist_ok=True)
 
-                    # Move folder structure and subtitle files only
+                    # Copy folder structure and subtitle files only
                     # Walk through the source folder
                     for root, dirs, files in os.walk(folder_path):
                         # Calculate relative path from source folder
@@ -1304,56 +1306,33 @@ async def recover_subtitle_folders(
                         # Create target directory structure
                         target_dir.mkdir(parents=True, exist_ok=True)
 
-                        # Move files: only subtitle files, skip media files
+                        # Copy files: only subtitle files, skip everything else
                         for file in files:
                             source_file = Path(root) / file
                             target_file = target_dir / file
 
-                            # Only move subtitle files, skip media files and images
-                            if is_subtitle_file(source_file, subtitle_extensions):
+                            # Only copy subtitle files, skip all other files
+                            if is_subtitle_file(
+                                source_file, subtitle_extensions
+                            ):
                                 import shutil
 
-                                shutil.move(str(source_file), str(target_file))
-                                subtitle_files_moved += 1
-                                logger.debug(
-                                    f"Moved subtitle file: {source_file.name} to {target_file}"
+                                shutil.copy2(
+                                    str(source_file), str(target_file)
                                 )
-                            elif is_media_file(source_file):
-                                # Skip media files - don't move them
+                                subtitle_files_copied += 1
                                 logger.debug(
-                                    f"Skipping media file: {source_file.name}"
+                                    f"Copied subtitle file: {source_file.name} to {target_file}"
                                 )
                             else:
-                                # For other files (like .nfo, .txt, etc.), move them
-                                # to preserve folder structure
-                                import shutil
-
-                                shutil.move(str(source_file), str(target_file))
+                                # Skip all non-subtitle files (media files, .nfo, .txt, etc.)
                                 logger.debug(
-                                    f"Moved other file: {source_file.name} to {target_file}"
+                                    f"Skipping non-subtitle file: {source_file.name}"
                                 )
 
-                    # After moving all files, remove empty source folder structure
-                    # Only remove if folder is empty or only contains empty subdirectories
-                    def remove_empty_dirs(path: Path):
-                        """Recursively remove empty directories"""
-                        try:
-                            for item in path.iterdir():
-                                if item.is_dir():
-                                    remove_empty_dirs(item)
-                            # Try to remove directory if it's empty
-                            try:
-                                path.rmdir()
-                            except OSError:
-                                pass  # Directory not empty, skip
-                        except Exception:
-                            pass  # Error reading directory, skip
-
-                    remove_empty_dirs(folder_path)
-
-                    moved_folders.append(folder_name)
+                    copied_folders.append(folder_name)
                     logger.info(
-                        f"Successfully finished moving folder: {folder_name}"
+                        f"Successfully finished copying folder: {folder_name}"
                     )
                     recovery_folders_moved_total.labels(
                         recycled_directory=recycled_dir,
@@ -1362,35 +1341,37 @@ async def recover_subtitle_folders(
                     ).inc()
 
                 except Exception as e:
-                    error_msg = f"Failed to move folder {folder_name}: {str(e)}"
+                    error_msg = (
+                        f"Failed to copy folder {folder_name}: {str(e)}"
+                    )
                     logger.error(error_msg)
                     errors.append(error_msg)
                     recovery_errors_total.labels(
                         recycled_directory=recycled_dir,
                         recovered_directory=recovered_dir,
-                        error_type="folder_move_error",
+                        error_type="folder_copy_error",
                     ).inc()
             else:
-                # Dry run mode - just count what would be moved
+                # Dry run mode - just count what would be copied
                 logger.info(
-                    f"DRY RUN: Would move folder: {folder_name} from {folder_path} to {target_folder_path}"
+                    f"DRY RUN: Would copy folder: {folder_name} from {folder_path} to {target_folder_path}"
                 )
-                moved_folders.append(folder_name)
+                copied_folders.append(folder_name)
 
-                # Count subtitle files that would be moved
+                # Count subtitle files that would be copied
                 for root, dirs, files in os.walk(folder_path):
                     for file in files:
                         source_file = Path(root) / file
                         if is_subtitle_file(source_file, subtitle_extensions):
-                            subtitle_files_moved += 1
+                            subtitle_files_copied += 1
 
-        # Record metric for subtitle files moved
-        if subtitle_files_moved > 0:
+        # Record metric for subtitle files copied
+        if subtitle_files_copied > 0:
             recovery_subtitle_files_moved_total.labels(
                 recycled_directory=recycled_dir,
                 recovered_directory=recovered_dir,
                 dry_run=str(dry_run).lower(),
-            ).inc(subtitle_files_moved)
+            ).inc(subtitle_files_copied)
 
         # Record operation duration
         operation_duration = time.time() - start_time
@@ -1407,11 +1388,11 @@ async def recover_subtitle_folders(
             "subtitle_extensions": subtitle_extensions,
             "folders_scanned": len(folders_to_check),
             "folders_with_subtitles_found": len(folders_with_subtitles),
-            "folders_moved": len(moved_folders),
-            "subtitle_files_moved": subtitle_files_moved,
+            "folders_copied": len(copied_folders),
+            "subtitle_files_copied": subtitle_files_copied,
             "errors": len(errors),
             "folders_with_subtitles": [f.name for f in folders_with_subtitles],
-            "moved_folders": moved_folders,
+            "copied_folders": copied_folders,
             "error_details": errors,
         }
 
