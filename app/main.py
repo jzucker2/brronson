@@ -324,7 +324,7 @@ def validate_directory(
     Args:
         directory_path: Path to the directory to validate
         cleanup_dir: String representation of the cleanup directory for error messages  # noqa: E501
-        operation_type: Type of operation ("scan" or "cleanup") for metrics
+        operation_type: Type of operation ("scan", "cleanup", "comparison", or "recovery") for metrics
 
     Raises:
         HTTPException: If directory validation fails
@@ -342,6 +342,30 @@ def validate_directory(
             comparison_errors_total.labels(
                 directory=cleanup_dir, error_type="directory_not_found"
             ).inc()
+        elif operation_type == "recovery":
+            # For recovery operations, we need to determine which directory failed
+            # This is a bit of a hack, but we'll use the directory path to determine
+            # if it's recycled or recovered directory
+            recycled_dir = get_recycled_movies_directory()
+            recovered_dir = get_recovered_movies_directory()
+            dir_str = str(directory_path)
+
+            # Determine which directory this is
+            if (
+                recycled_dir in dir_str
+                or str(Path(recycled_dir).resolve()) in dir_str
+            ):
+                recovery_errors_total.labels(
+                    recycled_directory=recycled_dir,
+                    recovered_directory=recovered_dir,
+                    error_type="recycled_directory_not_found",
+                ).inc()
+            else:
+                recovery_errors_total.labels(
+                    recycled_directory=recycled_dir,
+                    recovered_directory=recovered_dir,
+                    error_type="recovered_directory_not_found",
+                ).inc()
         raise HTTPException(
             status_code=404,
             detail=f"Configured directory {cleanup_dir} not found",
@@ -374,9 +398,18 @@ def validate_directory(
             if dir_str == sys_dir_path or dir_str.startswith(
                 sys_dir_path + "/"
             ):  # noqa: E501
+                # Record error in appropriate metric based on operation type
+                if operation_type == "recovery":
+                    recycled_dir = get_recycled_movies_directory()
+                    recovered_dir = get_recovered_movies_directory()
+                    recovery_errors_total.labels(
+                        recycled_directory=recycled_dir,
+                        recovered_directory=recovered_dir,
+                        error_type="protected_system_location",
+                    ).inc()
                 raise HTTPException(
                     status_code=400,
-                    detail="Configured cleanup directory is in a protected system location",  # noqa: E501
+                    detail="Configured directory is in a protected system location",  # noqa: E501
                 )
 
 
@@ -1219,8 +1252,8 @@ async def recover_subtitle_folders(
         recovered_path = Path(recovered_dir).resolve()
 
         # Validate both directories
-        validate_directory(recycled_path, recycled_dir, "comparison")
-        validate_directory(recovered_path, recovered_dir, "comparison")
+        validate_directory(recycled_path, recycled_dir, "recovery")
+        validate_directory(recovered_path, recovered_dir, "recovery")
 
         # Ensure recovered directory exists
         recovered_path.mkdir(parents=True, exist_ok=True)
