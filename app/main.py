@@ -344,27 +344,38 @@ def validate_directory(
             ).inc()
         elif operation_type == "recovery":
             # For recovery operations, we need to determine which directory failed
-            # This is a bit of a hack, but we'll use the directory path to determine
-            # if it's recycled or recovered directory
+            # Use resolved path comparison to avoid substring false positives
             recycled_dir = get_recycled_movies_directory()
             recovered_dir = get_recovered_movies_directory()
-            dir_str = str(directory_path)
+            recycled_path_resolved = str(Path(recycled_dir).resolve())
+            recovered_path_resolved = str(Path(recovered_dir).resolve())
+            dir_str_resolved = str(directory_path.resolve())
 
-            # Determine which directory this is
+            # Determine which directory this is using exact path comparison
             if (
-                recycled_dir in dir_str
-                or str(Path(recycled_dir).resolve()) in dir_str
+                dir_str_resolved == recycled_path_resolved
+                or dir_str_resolved.startswith(recycled_path_resolved + "/")
             ):
                 recovery_errors_total.labels(
                     recycled_directory=recycled_dir,
                     recovered_directory=recovered_dir,
                     error_type="recycled_directory_not_found",
                 ).inc()
-            else:
+            elif (
+                dir_str_resolved == recovered_path_resolved
+                or dir_str_resolved.startswith(recovered_path_resolved + "/")
+            ):
                 recovery_errors_total.labels(
                     recycled_directory=recycled_dir,
                     recovered_directory=recovered_dir,
                     error_type="recovered_directory_not_found",
+                ).inc()
+            else:
+                # Fallback: if we can't determine, use a generic error type
+                recovery_errors_total.labels(
+                    recycled_directory=recycled_dir,
+                    recovered_directory=recovered_dir,
+                    error_type="directory_not_found",
                 ).inc()
         raise HTTPException(
             status_code=404,
@@ -1308,26 +1319,30 @@ async def recover_subtitle_folders(
             folder_name = folder_path.name
             target_folder_path = recovered_path / folder_name
 
-            if not dry_run:
-                try:
-                    # Check if target folder already exists
-                    if target_folder_path.exists():
-                        error_msg = f"Target folder {target_folder_path} already exists"
-                        logger.warning(error_msg)
-                        errors.append(error_msg)
-                        recovery_errors_total.labels(
-                            recycled_directory=recycled_dir,
-                            recovered_directory=recovered_dir,
-                            error_type="target_exists",
-                        ).inc()
-                        continue
+            # Check if target folder already exists (both dry run and actual)
+            if target_folder_path.exists():
+                error_msg = (
+                    f"Target folder {target_folder_path} already exists"
+                )
+                logger.warning(error_msg)
+                errors.append(error_msg)
+                recovery_errors_total.labels(
+                    recycled_directory=recycled_dir,
+                    recovered_directory=recovered_dir,
+                    error_type="target_exists",
+                ).inc()
+                continue
 
+            if not dry_run:
+                target_created = False
+                try:
                     logger.info(
                         f"Starting to copy folder: {folder_name} from {folder_path} to {target_folder_path}"
                     )
 
                     # Create target folder
                     target_folder_path.mkdir(parents=True, exist_ok=True)
+                    target_created = True
 
                     # Copy folder structure and subtitle files only
                     # Walk through the source folder
@@ -1384,8 +1399,25 @@ async def recover_subtitle_folders(
                         recovered_directory=recovered_dir,
                         error_type="folder_copy_error",
                     ).inc()
+
+                    # Clean up partially created target folder on failure
+                    if target_created and target_folder_path.exists():
+                        import shutil
+
+                        try:
+                            logger.warning(
+                                f"Cleaning up partially created folder: {target_folder_path}"
+                            )
+                            shutil.rmtree(target_folder_path)
+                            logger.info(
+                                f"Successfully cleaned up partial folder: {target_folder_path}"
+                            )
+                        except Exception as cleanup_error:
+                            logger.error(
+                                f"Failed to clean up partial folder {target_folder_path}: {str(cleanup_error)}"
+                            )
             else:
-                # Dry run mode - just count what would be copied
+                # Dry run mode - count what would be copied (already checked target doesn't exist)
                 logger.info(
                     f"DRY RUN: Would copy folder: {folder_name} from {folder_path} to {target_folder_path}"
                 )
