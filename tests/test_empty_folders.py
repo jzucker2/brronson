@@ -183,7 +183,9 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
         os.environ["TARGET_DIRECTORY"] = "/nonexistent/dir"
 
         response = client.post("/api/v1/cleanup/empty-folders")
-        self.assertEqual(response.status_code, 400)
+        # validate_directory raises 404 for directory_not_found, which is the
+        # correct HTTP status code for a resource that doesn't exist
+        self.assertEqual(response.status_code, 404)
         data = response.json()
         self.assertIn("not found", data["detail"])
 
@@ -798,7 +800,7 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
         # The symlink itself is content that makes the folder non-empty
         empty_folder_names = [Path(f).name for f in data["empty_folders"]]
         self.assertNotIn(
-            "folder_with_symlink",
+            "folder_with_dir_symlink",
             empty_folder_names,
             "Folder with symlink to directory should not be marked as empty",
         )

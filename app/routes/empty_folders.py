@@ -153,8 +153,13 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
 
     try:
         target_path = Path(target_dir).resolve()
-        validate_directory(target_path, target_dir, "scan")
+        validate_directory(target_path, target_dir, "empty_folders")
+    except HTTPException:
+        # validate_directory already recorded the error in the correct metric
+        # (empty_folders_errors_total), so we just re-raise
+        raise
     except Exception as e:
+        # For any other unexpected exceptions, record in empty_folders_errors_total
         empty_folders_errors_total.labels(
             target_directory=target_dir, error_type="validation_error"
         ).inc()
