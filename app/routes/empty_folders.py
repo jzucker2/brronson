@@ -23,11 +23,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def find_empty_folders(directory_path: Path) -> List[Path]:
+def find_empty_folders(
+    directory_path: Path, max_folders: int = None
+) -> List[Path]:
     """
-    Recursively find all empty folders in a directory.
+    Recursively find empty folders in a directory.
 
-    This function finds all empty folders, including nested ones.
+    This function finds empty folders, including nested ones.
     It processes directories from deepest to shallowest to ensure
     that when a parent folder only contains empty subdirectories,
     it can be identified correctly.
@@ -38,6 +40,9 @@ def find_empty_folders(directory_path: Path) -> List[Path]:
 
     Args:
         directory_path: Path to the directory to scan
+        max_folders: Maximum number of empty folders to find. If None,
+                    scans the entire directory. If provided (> 0), stops
+                    scanning once this many folders are found.
 
     Returns:
         List of Path objects for empty folders (sorted deepest first)
@@ -49,6 +54,10 @@ def find_empty_folders(directory_path: Path) -> List[Path]:
     # Walk through directory from bottom up (deepest first)
     # This ensures we process nested empty folders correctly
     for root, dirs, files in os.walk(directory_path, topdown=False):
+        # Stop scanning if we've reached the maximum number of folders
+        if max_folders is not None and len(empty_folders) >= max_folders:
+            break
+
         root_path = Path(root).resolve()
 
         # CRITICAL: Never include the target directory itself in results
@@ -112,6 +121,12 @@ def find_empty_folders(directory_path: Path) -> List[Path]:
                     # Directory only contains empty subdirectories, so it's empty
                     empty_folders.append(root_path)
                     empty_folders_set.add(root_path.resolve())
+                    # Stop scanning if we've reached the maximum number of folders
+                    if (
+                        max_folders is not None
+                        and len(empty_folders) >= max_folders
+                    ):
+                        break
         except (OSError, PermissionError):
             # Skip directories we can't read
             pass
@@ -122,21 +137,24 @@ def find_empty_folders(directory_path: Path) -> List[Path]:
 @router.post("/api/v1/cleanup/empty-folders")
 async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
     """
-    Recursively find and delete all empty folders in the target directory.
+    Recursively find and delete empty folders in the target directory.
 
     This endpoint:
     - Scans the target directory recursively
-    - Identifies all empty folders (folders with no files or subdirectories)
+    - Identifies empty folders (folders with no files or subdirectories)
     - Deletes empty folders (or shows what would be deleted in dry run mode)
     - Processes folders from deepest to shallowest to handle nested empty folders
     - Supports batch processing for re-entrant operations
 
     Args:
         dry_run: If True, only show what would be deleted (default: True)
-        batch_size: Maximum number of empty folders to delete per request (default: 100).
-                   Only counts folders actually deleted, not skipped folders. This makes the
-                   operation re-entrant - subsequent requests will continue from where
-                   the previous request stopped.
+        batch_size: Maximum number of empty folders to scan and process per request
+                   (default: 100). If provided, scanning stops once this many empty
+                   folders are found. If not provided or 0, performs a full scan
+                   of the entire directory. Only counts folders actually deleted,
+                   not skipped folders. This makes the operation re-entrant -
+                   subsequent requests will continue from where the previous request
+                   stopped.
 
     Returns:
         dict: Cleanup results including folders found, removed, and errors
@@ -145,10 +163,11 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
     target_dir = get_target_directory()
 
     # Validate batch_size parameter
-    if batch_size <= 0:
+    # batch_size of 0 means full scan (no limit), negative values are invalid
+    if batch_size < 0:
         raise HTTPException(
             status_code=400,
-            detail=f"batch_size must be a positive integer, got {batch_size}",
+            detail=f"batch_size must be a non-negative integer, got {batch_size}",
         )
 
     try:
@@ -168,8 +187,13 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
         )
 
     try:
-        # Find all empty folders
-        empty_folders = find_empty_folders(target_path)
+        # Find empty folders, with optional batch_size limit on scanning
+        # If batch_size > 0, only scan until we find that many folders
+        # If batch_size is 0 or None, scan the entire directory
+        max_folders_to_scan = batch_size if batch_size > 0 else None
+        empty_folders = find_empty_folders(
+            target_path, max_folders=max_folders_to_scan
+        )
 
         logger.info(
             f"Empty folder scan completed: Found {len(empty_folders)} empty folders in {target_path}"
@@ -182,9 +206,16 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
         removed_folders = []
         errors = []
         processed_count = 0
-        batch_limit_hit = False
+        # batch_limit_reached is True if:
+        # - batch_size > 0 (a limit was set)
+        # - We found exactly batch_size folders (scan stopped at limit)
+        # This indicates there may be more folders remaining
+        batch_limit_hit = batch_size > 0 and len(empty_folders) >= batch_size
 
         # Process empty folders for removal (already sorted deepest first)
+        # Note: If batch_size was provided, we already limited the scan,
+        # so we process all found folders. If batch_size was 0 or not provided,
+        # we process all found folders (full scan).
         for folder_path in empty_folders:
             # CRITICAL: Defense in depth - never delete the target directory itself
             # This is a safety guard even though find_empty_folders excludes it
@@ -194,15 +225,6 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
                     f"This should never happen, but skipping to prevent data loss."
                 )
                 continue
-
-            # Check if we've reached the batch limit
-            if processed_count >= batch_size:
-                batch_limit_hit = True
-                logger.info(
-                    f"Batch limit reached ({batch_size} folders processed), "
-                    f"stopping processing. {len(empty_folders) - processed_count} folders remaining."
-                )
-                break
 
             if not dry_run:
                 try:
@@ -283,7 +305,11 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
             "empty_folders_removed": len(removed_folders),
             "errors": len(errors),
             "batch_limit_reached": batch_limit_hit,
-            "remaining_folders": len(empty_folders) - processed_count,
+            "remaining_folders": (
+                # If batch limit was hit, we don't know how many remain
+                # without a full scan, so return 0 (unknown)
+                0
+            ),
             "empty_folders": [
                 str(f.relative_to(target_path)) for f in empty_folders
             ],

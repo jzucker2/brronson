@@ -280,7 +280,7 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
         self.assertNotIn("hidden_files", empty_folder_paths)
 
     def test_cleanup_empty_folders_batch_size(self):
-        """Test that batch_size parameter limits folders deleted"""
+        """Test that batch_size parameter limits folders scanned and deleted"""
         # First, clean up existing empty folders from setUp
         client.post("/api/v1/cleanup/empty-folders?dry_run=false")
 
@@ -296,12 +296,14 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
-        # Should have deleted exactly 3 folders
+        # With batch_size=3, scan stops after finding 3 folders
+        # All 3 found folders should be deleted
         self.assertEqual(data["batch_size"], 3)
+        self.assertEqual(data["empty_folders_found"], 3)
         self.assertEqual(data["empty_folders_removed"], 3)
-        self.assertGreaterEqual(data["empty_folders_found"], 5)
+        # Since scan was limited to 3, there may be more folders remaining
+        # but we don't know how many without a full scan
         self.assertTrue(data["batch_limit_reached"])
-        self.assertGreaterEqual(data["remaining_folders"], 2)
 
         # Verify only 3 batch_empty folders were deleted
         deleted_count = sum(
@@ -327,34 +329,36 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
+        # With batch_size=2, scan stops after finding 2 folders
         # Dry run should show batch limit would be reached
         self.assertTrue(data["dry_run"])
         self.assertEqual(data["batch_size"], 2)
-        self.assertGreaterEqual(data["empty_folders_found"], 3)
+        self.assertEqual(data["empty_folders_found"], 2)
         self.assertTrue(data["batch_limit_reached"])
-        self.assertGreaterEqual(data["remaining_folders"], 1)
 
         # Verify folders still exist (dry run)
         for i in range(1, 4):
             self.assertTrue((self.test_path / f"batch_dry_run{i}").exists())
 
     def test_cleanup_empty_folders_batch_size_validation(self):
-        """Test that batch_size validation rejects zero and negative values"""
-        # Test with batch_size=0
+        """Test that batch_size validation rejects negative values but allows zero"""
+        # Test with batch_size=0 (should be allowed - means full scan)
         response = client.post(
             "/api/v1/cleanup/empty-folders?dry_run=false&batch_size=0"
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertIn("batch_size must be a positive integer", data["detail"])
+        self.assertEqual(data["batch_size"], 0)
 
-        # Test with negative batch_size
+        # Test with negative batch_size (should be rejected)
         response = client.post(
             "/api/v1/cleanup/empty-folders?dry_run=false&batch_size=-1"
         )
         self.assertEqual(response.status_code, 400)
         data = response.json()
-        self.assertIn("batch_size must be a positive integer", data["detail"])
+        self.assertIn(
+            "batch_size must be a non-negative integer", data["detail"]
+        )
 
     def test_cleanup_empty_folders_reentrant(self):
         """Test that empty folder cleanup is re-entrant - can resume from where it stopped"""
@@ -366,28 +370,29 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             folder_path = self.test_path / f"reentrant_empty{i}"
             folder_path.mkdir(exist_ok=True)
 
-        # First request: delete 2 folders with batch_size=2
+        # First request: scan and delete 2 folders with batch_size=2
         response1 = client.post(
             "/api/v1/cleanup/empty-folders?dry_run=false&batch_size=2"
         )
         self.assertEqual(response1.status_code, 200)
         data1 = response1.json()
 
+        # With batch_size=2, scan finds 2 folders and deletes them
+        self.assertEqual(data1["empty_folders_found"], 2)
         self.assertEqual(data1["empty_folders_removed"], 2)
         self.assertTrue(data1["batch_limit_reached"])
-        self.assertGreaterEqual(data1["remaining_folders"], 3)
 
-        # Second request: should continue and delete next 2 folders
+        # Second request: should continue and scan/delete next 2 folders
         response2 = client.post(
             "/api/v1/cleanup/empty-folders?dry_run=false&batch_size=2"
         )
         self.assertEqual(response2.status_code, 200)
         data2 = response2.json()
 
-        # Should delete 2 more folders (batch_size=2)
+        # Should scan and delete 2 more folders (batch_size=2)
+        self.assertEqual(data2["empty_folders_found"], 2)
         self.assertEqual(data2["empty_folders_removed"], 2)
         self.assertTrue(data2["batch_limit_reached"])
-        self.assertGreaterEqual(data2["remaining_folders"], 1)
 
         # Third request: should finish deleting remaining folders
         response3 = client.post(
@@ -679,14 +684,18 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             data = response.json()
 
-        # Should have deleted exactly 3 folders (the error doesn't count)
-        # The first folder will error, but we should still process other
-        # folders to reach batch_size=3 successful deletions
+        # With batch_size=3, scan finds 3 folders
+        # The first folder will error, so only 2 succeed
+        # Errors don't count toward batch limit, but scan already stopped at 3
+        self.assertEqual(
+            data["empty_folders_found"],
+            3,
+            "Should find exactly 3 folders (batch_size=3 limits scan)",
+        )
         self.assertEqual(
             data["empty_folders_removed"],
-            3,
-            "Should delete exactly 3 folders even if one errors. "
-            "Errors don't count toward batch limit.",
+            2,
+            "Should delete 2 folders (1 error doesn't count, but scan found 3 total)",
         )
 
         # Verify that exactly one folder failed
@@ -704,12 +713,14 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             "Folder with error should still exist",
         )
 
-        # Verify that exactly 3 other folders were deleted
+        # Verify that exactly 2 folders were deleted (1 failed, 2 succeeded)
+        # With batch_size=3, we found 3 folders, but 1 failed to delete
         deleted_folders = [f for f in folders if not f.exists()]
         self.assertEqual(
             len(deleted_folders),
-            3,
-            "Exactly 3 folders should be deleted despite the error",
+            2,
+            "Exactly 2 folders should be deleted (1 error, 2 successful). "
+            "Scan found 3 folders total, but one failed to delete.",
         )
 
         # Verify the mock was actually called (debugging for CI)
