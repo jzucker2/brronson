@@ -649,24 +649,24 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             folder_path.mkdir()
             folders.append(folder_path)
 
-        # Identify the folder that will fail (use the 3rd one)
-        failing_folder = folders[2]
-        failing_folder_path_str = str(failing_folder.resolve())
-
         # Track which folders were attempted and which succeeded
         attempted_folders = []
         successful_deletions = []
+        failed_folders = []
 
         original_rmdir = Path.rmdir
 
         def mock_rmdir(self):
-            attempted_folders.append(str(self.resolve()))
-            # Fail on the specific folder we identified
-            if str(self.resolve()) == failing_folder_path_str:
+            folder_path_str = str(self.resolve())
+            attempted_folders.append(folder_path_str)
+            # Fail on the first folder attempted (to guarantee it's in the batch)
+            # This ensures the error occurs early enough to test the behavior
+            if len(attempted_folders) == 1:
+                failed_folders.append(folder_path_str)
                 raise OSError("Permission denied")
             # Otherwise, call the original
             result = original_rmdir(self)
-            successful_deletions.append(str(self.resolve()))
+            successful_deletions.append(folder_path_str)
             return result
 
         # Run cleanup with batch_size=3, with one folder failing
@@ -678,7 +678,7 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             data = response.json()
 
         # Should have deleted exactly 3 folders (the error doesn't count)
-        # The failing folder will error, but we should still process other
+        # The first folder will error, but we should still process other
         # folders to reach batch_size=3 successful deletions
         self.assertEqual(
             data["empty_folders_removed"],
@@ -687,7 +687,16 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             "Errors don't count toward batch limit.",
         )
 
+        # Verify that exactly one folder failed
+        self.assertEqual(
+            len(failed_folders),
+            1,
+            "Exactly one folder should have failed",
+        )
+
         # Verify that the failing folder still exists (it had the error)
+        failing_folder_path_str = failed_folders[0]
+        failing_folder = Path(failing_folder_path_str)
         self.assertTrue(
             failing_folder.exists(),
             "Folder with error should still exist",
@@ -708,12 +717,17 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             "Mock rmdir should have been called at least once",
         )
 
-        # Verify the failing folder was attempted
+        # Verify the failing folder was attempted (it should be the first one)
         self.assertIn(
             failing_folder_path_str,
             attempted_folders,
             f"Failing folder {failing_folder_path_str} should have been attempted. "
             f"Attempted: {attempted_folders}",
+        )
+        self.assertEqual(
+            attempted_folders[0],
+            failing_folder_path_str,
+            "Failing folder should be the first one attempted",
         )
 
         # Verify the error was recorded in the response
@@ -742,10 +756,12 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
 
         # Verify that the failing folder path appears in error details
         error_details_str = " ".join(data["error_details"])
+        # The failing folder name should be in the error details
+        failing_folder_name = failing_folder.name
         self.assertIn(
-            "error_batch_test3",
+            failing_folder_name,
             error_details_str,
-            "Error details should mention the failing folder",
+            f"Error details should mention the failing folder {failing_folder_name}",
         )
 
         # Clean up the remaining folder
