@@ -68,33 +68,36 @@ def find_empty_folders(directory_path: Path) -> List[Path]:
                 # (that we've already identified as empty)
                 has_non_empty_content = False
                 for item in items:
+                    # CRITICAL: Check for symlinks FIRST, before is_dir() or is_file()
+                    # because is_dir() follows symlinks. A symlink to a directory
+                    # would be incorrectly treated as a directory, but the symlink
+                    # itself is a filesystem entry that makes the folder non-empty.
+                    if item.is_symlink():
+                        # Has symlink (even if it points to an empty directory),
+                        # so not empty. The symlink itself is content.
+                        has_non_empty_content = True
+                        break
                     # Check for regular files
-                    if item.is_file():
+                    elif item.is_file():
                         # Has files, so not empty
                         has_non_empty_content = True
                         break
-                    # Check for directories
+                    # Check for directories (only reached if not a symlink)
                     elif item.is_dir():
                         # Check if this subdirectory is in our empty set
                         if item.resolve() not in empty_folders_set:
                             # Has non-empty subdirectory, so not empty
                             has_non_empty_content = True
                             break
-                    # Check for special files: symlinks (including broken),
-                    # sockets, named pipes, device files, etc.
-                    # These return False for both is_file() and is_dir()
+                    # Check for other special files: sockets, named pipes,
+                    # device files, etc. These return False for both
+                    # is_file() and is_dir() and is_symlink()
                     else:
-                        # Check if it's a symlink (even if broken)
-                        if item.is_symlink():
-                            # Has symlink, so not empty
-                            has_non_empty_content = True
-                            break
                         # Check if item exists (catches other special files)
-                        # Use os.path.lexists() which returns True even for
-                        # broken symlinks, and stat() to catch other special files
+                        # Use stat() to catch other special files
                         try:
                             # Try to stat the item - if it succeeds, it's a real
-                            # item (file, dir, socket, pipe, device, etc.)
+                            # item (socket, pipe, device, etc.)
                             item.stat()
                             # Item exists and is stat-able, so not empty
                             has_non_empty_content = True
@@ -229,8 +232,9 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
                         target_directory=target_dir,
                         error_type="folder_removal_error",
                     ).inc()
-                    # Still count as processed even if it failed
-                    processed_count += 1
+                    # Don't count errors toward batch limit - only successful
+                    # deletions count. This ensures re-entrancy: persistent errors
+                    # won't block progress on other folders.
                 except Exception as e:
                     error_msg = f"Failed to remove {folder_path}: {str(e)}"
                     logger.error(error_msg)
@@ -239,8 +243,9 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
                         target_directory=target_dir,
                         error_type="folder_removal_error",
                     ).inc()
-                    # Still count as processed even if it failed
-                    processed_count += 1
+                    # Don't count errors toward batch limit - only successful
+                    # deletions count. This ensures re-entrancy: persistent errors
+                    # won't block progress on other folders.
             else:
                 logger.info(
                     f"DRY RUN: Would remove empty folder: {folder_path.relative_to(target_path)}"

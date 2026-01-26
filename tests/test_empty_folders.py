@@ -635,6 +635,184 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
         broken_symlink.unlink()
         folder_with_special.rmdir()
 
+    def test_errors_dont_count_toward_batch_limit(self):
+        """Test that errors don't count toward batch_size, ensuring re-entrancy"""
+        import unittest.mock
+
+        # First, clean up existing empty folders from setUp
+        client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+
+        # Create 5 empty folders
+        folders = []
+        for i in range(1, 6):
+            folder_path = self.test_path / f"error_batch_test{i}"
+            folder_path.mkdir()
+            folders.append(folder_path)
+
+        # Mock rmdir() to fail for the 3rd folder, simulating a permission error
+        # or other deletion failure
+        original_rmdir = Path.rmdir
+        call_count = [0]
+
+        def mock_rmdir(self):
+            call_count[0] += 1
+            # Fail on the 3rd folder (error_batch_test3)
+            if self.name == "error_batch_test3":
+                raise OSError("Permission denied")
+            return original_rmdir(self)
+
+        # Run cleanup with batch_size=3, with one folder failing
+        with unittest.mock.patch.object(Path, "rmdir", mock_rmdir):
+            response = client.post(
+                "/api/v1/cleanup/empty-folders?dry_run=false&batch_size=3"
+            )
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+
+        # Should have deleted exactly 3 folders (the error doesn't count)
+        # The 3rd folder will error, but we should still process folders
+        # 4 and 5 to reach batch_size=3 successful deletions
+        self.assertEqual(
+            data["empty_folders_removed"],
+            3,
+            "Should delete exactly 3 folders even if one errors. "
+            "Errors don't count toward batch limit.",
+        )
+
+        # Verify that error_batch_test3 still exists (it had the error)
+        self.assertTrue(
+            folders[2].exists(),
+            "Folder with error should still exist",
+        )
+
+        # Verify that exactly 3 other folders were deleted
+        deleted_folders = [f for f in folders if not f.exists()]
+        self.assertEqual(
+            len(deleted_folders),
+            3,
+            "Exactly 3 folders should be deleted despite the error",
+        )
+
+        # Verify the error was recorded
+        self.assertGreater(
+            data["errors"],
+            0,
+            "Error should be recorded in response",
+        )
+
+        # Clean up the remaining folder
+        folders[2].rmdir()
+
+    def test_symlink_to_empty_directory_not_marked_as_empty(self):
+        """Test that folders containing symlinks to directories are not marked as empty"""
+        # First, clean up existing empty folders from setUp
+        client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+
+        # Create an empty directory
+        empty_target = self.test_path / "empty_target"
+        empty_target.mkdir()
+
+        # Create a folder containing a symlink to the empty directory
+        folder_with_symlink = self.test_path / "folder_with_dir_symlink"
+        folder_with_symlink.mkdir()
+
+        # Create a symlink to the empty directory
+        dir_symlink = folder_with_symlink / "link_to_empty"
+        dir_symlink.symlink_to(empty_target)
+
+        # Verify symlink exists and points to a directory
+        self.assertTrue(dir_symlink.is_symlink())
+        self.assertTrue(dir_symlink.is_dir())  # is_dir() follows symlinks
+
+        # Run cleanup - should NOT mark folder_with_symlink as empty
+        # even though the symlink points to an empty directory
+        response = client.post("/api/v1/cleanup/empty-folders?dry_run=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # folder_with_symlink should NOT be in empty folders list
+        # The symlink itself is content that makes the folder non-empty
+        empty_folder_names = [Path(f).name for f in data["empty_folders"]]
+        self.assertNotIn(
+            "folder_with_symlink",
+            empty_folder_names,
+            "Folder with symlink to directory should not be marked as empty",
+        )
+
+        # empty_target should be in the empty folders list (it's actually empty)
+        self.assertIn(
+            "empty_target",
+            empty_folder_names,
+            "Empty target directory should be marked as empty",
+        )
+
+        # Verify folders still exist
+        self.assertTrue(folder_with_symlink.exists())
+        self.assertTrue(empty_target.exists())
+
+        # Try actual deletion - should delete empty_target but not folder_with_symlink
+        response2 = client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+        self.assertEqual(response2.status_code, 200)
+
+        # empty_target should be deleted
+        self.assertFalse(empty_target.exists())
+
+        # folder_with_symlink should still exist (it's not empty)
+        self.assertTrue(folder_with_symlink.exists())
+
+        # Clean up
+        dir_symlink.unlink()
+        folder_with_symlink.rmdir()
+
+    def test_symlink_to_nested_empty_directory_not_marked_as_empty(self):
+        """Test that folders with symlinks to nested empty directories are handled correctly"""
+        # First, clean up existing empty folders from setUp
+        client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+
+        # Create nested empty directories
+        nested_empty = self.test_path / "nested" / "empty"
+        nested_empty.mkdir(parents=True)
+
+        # Create a folder containing a symlink to the nested empty directory
+        folder_with_symlink = self.test_path / "folder_with_nested_symlink"
+        folder_with_symlink.mkdir()
+
+        # Create a symlink to the nested empty directory
+        nested_symlink = folder_with_symlink / "link_to_nested"
+        nested_symlink.symlink_to(nested_empty)
+
+        # Run cleanup - should NOT mark folder_with_symlink as empty
+        response = client.post("/api/v1/cleanup/empty-folders?dry_run=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # folder_with_symlink should NOT be in empty folders list
+        empty_folder_names = [Path(f).name for f in data["empty_folders"]]
+        self.assertNotIn(
+            "folder_with_nested_symlink",
+            empty_folder_names,
+            "Folder with symlink to nested empty directory should not be marked as empty",
+        )
+
+        # The nested empty directory should be found (but not deleted yet in dry_run)
+        # Check that nested/empty is in the list
+        nested_empty_relative = nested_empty.relative_to(self.test_path)
+        self.assertTrue(
+            any(
+                Path(f) == nested_empty_relative for f in data["empty_folders"]
+            ),
+            "Nested empty directory should be found",
+        )
+
+        # Verify folders still exist
+        self.assertTrue(folder_with_symlink.exists())
+        self.assertTrue(nested_empty.exists())
+
+        # Clean up
+        nested_symlink.unlink()
+        folder_with_symlink.rmdir()
+        # nested/empty will be cleaned up by the next test run's setUp cleanup
+
 
 if __name__ == "__main__":
     unittest.main()
