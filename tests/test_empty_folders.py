@@ -410,6 +410,231 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
         for i in range(1, 6):
             self.assertFalse((self.test_path / f"reentrant_empty{i}").exists())
 
+    def test_target_directory_never_deleted(self):
+        """Test that the target directory itself can never be deleted, even if empty"""
+        # First, clean up existing empty folders from setUp
+        client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+
+        # Create a scenario where the target directory would appear empty:
+        # 1. Create only empty subdirectories
+        # 2. Delete all of them
+        # 3. Verify target directory still exists
+
+        # Create multiple nested empty folders
+        (self.test_path / "only_empty1").mkdir()
+        (self.test_path / "only_empty2").mkdir()
+        (self.test_path / "only_empty3" / "nested").mkdir(parents=True)
+
+        # Verify target directory exists before cleanup
+        self.assertTrue(self.test_path.exists())
+        self.assertTrue(self.test_path.is_dir())
+
+        # Run cleanup - should delete all empty subdirectories
+        response = client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # All empty subdirectories should be deleted
+        self.assertGreaterEqual(data["empty_folders_removed"], 3)
+        self.assertFalse((self.test_path / "only_empty1").exists())
+        self.assertFalse((self.test_path / "only_empty2").exists())
+        self.assertFalse((self.test_path / "only_empty3").exists())
+
+        # CRITICAL: Target directory itself must still exist
+        self.assertTrue(
+            self.test_path.exists(),
+            "Target directory must never be deleted, even if all subdirectories are empty",
+        )
+        self.assertTrue(
+            self.test_path.is_dir(),
+            "Target directory must remain a directory",
+        )
+
+        # Run cleanup again - target directory should still be empty of subdirectories
+        # but should not be deleted itself
+        response2 = client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+        self.assertEqual(response2.status_code, 200)
+        data2 = response2.json()
+
+        # Should find no more empty folders (target directory excluded)
+        self.assertEqual(data2["empty_folders_found"], 0)
+        self.assertEqual(data2["empty_folders_removed"], 0)
+
+        # Target directory must still exist
+        self.assertTrue(
+            self.test_path.exists(),
+            "Target directory must still exist after second cleanup",
+        )
+
+        # Test with dry_run as well
+        response3 = client.post("/api/v1/cleanup/empty-folders?dry_run=true")
+        self.assertEqual(response3.status_code, 200)
+        data3 = response3.json()
+
+        # Should find no empty folders (target directory excluded)
+        self.assertEqual(data3["empty_folders_found"], 0)
+
+        # Target directory must still exist
+        self.assertTrue(
+            self.test_path.exists(),
+            "Target directory must still exist after dry run",
+        )
+
+    def test_empty_folder_detection_with_broken_symlink(self):
+        """Test that folders containing broken symlinks are not marked as empty"""
+        # First, clean up existing empty folders from setUp
+        client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+
+        # Create a folder with a broken symlink
+        folder_with_symlink = self.test_path / "folder_with_broken_symlink"
+        folder_with_symlink.mkdir()
+
+        # Create a broken symlink (points to non-existent file)
+        broken_symlink = folder_with_symlink / "broken_link"
+        broken_symlink.symlink_to("/nonexistent/path/to/file")
+
+        # Verify symlink exists but is broken
+        self.assertTrue(broken_symlink.is_symlink())
+        self.assertFalse(broken_symlink.exists())
+
+        # Run cleanup - should NOT mark folder as empty
+        response = client.post("/api/v1/cleanup/empty-folders?dry_run=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Folder should NOT be in empty folders list
+        empty_folder_names = [Path(f).name for f in data["empty_folders"]]
+        self.assertNotIn(
+            "folder_with_broken_symlink",
+            empty_folder_names,
+            "Folder with broken symlink should not be marked as empty",
+        )
+
+        # Folder should still exist
+        self.assertTrue(folder_with_symlink.exists())
+
+        # Clean up
+        broken_symlink.unlink()
+        folder_with_symlink.rmdir()
+
+    def test_empty_folder_detection_with_valid_symlink(self):
+        """Test that folders containing valid symlinks are not marked as empty"""
+        # First, clean up existing empty folders from setUp
+        client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+
+        # Create a folder with a valid symlink
+        folder_with_symlink = self.test_path / "folder_with_valid_symlink"
+        folder_with_symlink.mkdir()
+
+        # Create a target file
+        target_file = self.test_path / "target_file.txt"
+        target_file.write_text("test content")
+
+        # Create a valid symlink
+        valid_symlink = folder_with_symlink / "valid_link"
+        valid_symlink.symlink_to(target_file)
+
+        # Verify symlink exists and is valid
+        self.assertTrue(valid_symlink.is_symlink())
+        self.assertTrue(valid_symlink.exists())
+
+        # Run cleanup - should NOT mark folder as empty
+        response = client.post("/api/v1/cleanup/empty-folders?dry_run=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Folder should NOT be in empty folders list
+        empty_folder_names = [Path(f).name for f in data["empty_folders"]]
+        self.assertNotIn(
+            "folder_with_valid_symlink",
+            empty_folder_names,
+            "Folder with valid symlink should not be marked as empty",
+        )
+
+        # Folder should still exist
+        self.assertTrue(folder_with_symlink.exists())
+
+        # Clean up
+        valid_symlink.unlink()
+        target_file.unlink()
+        folder_with_symlink.rmdir()
+
+    @unittest.skipUnless(
+        hasattr(os, "mkfifo"), "Named pipes not supported on this platform"
+    )
+    def test_empty_folder_detection_with_named_pipe(self):
+        """Test that folders containing named pipes are not marked as empty"""
+        # First, clean up existing empty folders from setUp
+        client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+
+        # Create a folder with a named pipe
+        folder_with_pipe = self.test_path / "folder_with_pipe"
+        folder_with_pipe.mkdir()
+
+        # Create a named pipe (FIFO)
+        pipe_path = folder_with_pipe / "test_pipe"
+        os.mkfifo(str(pipe_path))
+
+        # Verify pipe exists
+        self.assertTrue(pipe_path.exists())
+
+        # Run cleanup - should NOT mark folder as empty
+        response = client.post("/api/v1/cleanup/empty-folders?dry_run=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Folder should NOT be in empty folders list
+        empty_folder_names = [Path(f).name for f in data["empty_folders"]]
+        self.assertNotIn(
+            "folder_with_pipe",
+            empty_folder_names,
+            "Folder with named pipe should not be marked as empty",
+        )
+
+        # Folder should still exist
+        self.assertTrue(folder_with_pipe.exists())
+
+        # Clean up
+        pipe_path.unlink()
+        folder_with_pipe.rmdir()
+
+    def test_empty_folder_detection_with_special_files(self):
+        """Test that folders containing only special files are not marked as empty"""
+        # First, clean up existing empty folders from setUp
+        client.post("/api/v1/cleanup/empty-folders?dry_run=false")
+
+        # Create a folder that will only contain special files
+        folder_with_special = self.test_path / "folder_with_special"
+        folder_with_special.mkdir()
+
+        # Create a broken symlink (special file type)
+        broken_symlink = folder_with_special / "broken"
+        broken_symlink.symlink_to("/nonexistent")
+
+        # Verify broken symlink exists
+        self.assertTrue(broken_symlink.is_symlink())
+        self.assertFalse(broken_symlink.exists())
+
+        # Run cleanup - should NOT mark folder as empty
+        response = client.post("/api/v1/cleanup/empty-folders?dry_run=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Folder should NOT be in empty folders list
+        empty_folder_names = [Path(f).name for f in data["empty_folders"]]
+        self.assertNotIn(
+            "folder_with_special",
+            empty_folder_names,
+            "Folder with special files should not be marked as empty",
+        )
+
+        # Folder should still exist
+        self.assertTrue(folder_with_special.exists())
+
+        # Clean up
+        broken_symlink.unlink()
+        folder_with_special.rmdir()
+
 
 if __name__ == "__main__":
     unittest.main()

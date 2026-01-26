@@ -32,6 +32,10 @@ def find_empty_folders(directory_path: Path) -> List[Path]:
     that when a parent folder only contains empty subdirectories,
     it can be identified correctly.
 
+    IMPORTANT: The target directory itself is never included in the results,
+    even if it becomes empty. This prevents accidental deletion of the
+    configured target directory root.
+
     Args:
         directory_path: Path to the directory to scan
 
@@ -40,11 +44,17 @@ def find_empty_folders(directory_path: Path) -> List[Path]:
     """
     empty_folders = []
     empty_folders_set = set()  # Track which folders we've identified as empty
+    resolved_target = directory_path.resolve()
 
     # Walk through directory from bottom up (deepest first)
     # This ensures we process nested empty folders correctly
     for root, dirs, files in os.walk(directory_path, topdown=False):
-        root_path = Path(root)
+        root_path = Path(root).resolve()
+
+        # CRITICAL: Never include the target directory itself in results
+        # This prevents accidental deletion of the configured root directory
+        if root_path == resolved_target:
+            continue
 
         # Check if directory is empty
         try:
@@ -52,27 +62,53 @@ def find_empty_folders(directory_path: Path) -> List[Path]:
             if len(items) == 0:
                 # Directory is completely empty
                 empty_folders.append(root_path)
-                empty_folders_set.add(root_path)
+                empty_folders_set.add(root_path.resolve())
             else:
                 # Check if directory only contains empty subdirectories
                 # (that we've already identified as empty)
                 has_non_empty_content = False
                 for item in items:
+                    # Check for regular files
                     if item.is_file():
                         # Has files, so not empty
                         has_non_empty_content = True
                         break
+                    # Check for directories
                     elif item.is_dir():
                         # Check if this subdirectory is in our empty set
-                        if item not in empty_folders_set:
+                        if item.resolve() not in empty_folders_set:
                             # Has non-empty subdirectory, so not empty
                             has_non_empty_content = True
                             break
+                    # Check for special files: symlinks (including broken),
+                    # sockets, named pipes, device files, etc.
+                    # These return False for both is_file() and is_dir()
+                    else:
+                        # Check if it's a symlink (even if broken)
+                        if item.is_symlink():
+                            # Has symlink, so not empty
+                            has_non_empty_content = True
+                            break
+                        # Check if item exists (catches other special files)
+                        # Use os.path.lexists() which returns True even for
+                        # broken symlinks, and stat() to catch other special files
+                        try:
+                            # Try to stat the item - if it succeeds, it's a real
+                            # item (file, dir, socket, pipe, device, etc.)
+                            item.stat()
+                            # Item exists and is stat-able, so not empty
+                            has_non_empty_content = True
+                            break
+                        except (OSError, ValueError):
+                            # Item doesn't exist or can't be stat'd
+                            # This shouldn't happen if we got it from iterdir(),
+                            # but handle gracefully
+                            pass
 
                 if not has_non_empty_content:
                     # Directory only contains empty subdirectories, so it's empty
                     empty_folders.append(root_path)
-                    empty_folders_set.add(root_path)
+                    empty_folders_set.add(root_path.resolve())
         except (OSError, PermissionError):
             # Skip directories we can't read
             pass
@@ -142,6 +178,15 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
 
         # Process empty folders for removal (already sorted deepest first)
         for folder_path in empty_folders:
+            # CRITICAL: Defense in depth - never delete the target directory itself
+            # This is a safety guard even though find_empty_folders excludes it
+            if folder_path.resolve() == target_path.resolve():
+                logger.warning(
+                    f"Attempted to delete target directory itself: {folder_path}. "
+                    f"This should never happen, but skipping to prevent data loss."
+                )
+                continue
+
             # Check if we've reached the batch limit
             if processed_count >= batch_size:
                 batch_limit_hit = True
