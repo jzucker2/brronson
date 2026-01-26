@@ -649,17 +649,25 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             folder_path.mkdir()
             folders.append(folder_path)
 
-        # Mock rmdir() to fail for the 3rd folder, simulating a permission error
-        # or other deletion failure
+        # Identify the folder that will fail (use the 3rd one)
+        failing_folder = folders[2]
+        failing_folder_path_str = str(failing_folder.resolve())
+
+        # Track which folders were attempted and which succeeded
+        attempted_folders = []
+        successful_deletions = []
+
         original_rmdir = Path.rmdir
-        call_count = [0]
 
         def mock_rmdir(self):
-            call_count[0] += 1
-            # Fail on the 3rd folder (error_batch_test3)
-            if self.name == "error_batch_test3":
+            attempted_folders.append(str(self.resolve()))
+            # Fail on the specific folder we identified
+            if str(self.resolve()) == failing_folder_path_str:
                 raise OSError("Permission denied")
-            return original_rmdir(self)
+            # Otherwise, call the original
+            result = original_rmdir(self)
+            successful_deletions.append(str(self.resolve()))
+            return result
 
         # Run cleanup with batch_size=3, with one folder failing
         with unittest.mock.patch.object(Path, "rmdir", mock_rmdir):
@@ -670,8 +678,8 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             data = response.json()
 
         # Should have deleted exactly 3 folders (the error doesn't count)
-        # The 3rd folder will error, but we should still process folders
-        # 4 and 5 to reach batch_size=3 successful deletions
+        # The failing folder will error, but we should still process other
+        # folders to reach batch_size=3 successful deletions
         self.assertEqual(
             data["empty_folders_removed"],
             3,
@@ -679,9 +687,9 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             "Errors don't count toward batch limit.",
         )
 
-        # Verify that error_batch_test3 still exists (it had the error)
+        # Verify that the failing folder still exists (it had the error)
         self.assertTrue(
-            folders[2].exists(),
+            failing_folder.exists(),
             "Folder with error should still exist",
         )
 
@@ -693,15 +701,55 @@ class TestEmptyFoldersCleanup(unittest.TestCase):
             "Exactly 3 folders should be deleted despite the error",
         )
 
-        # Verify the error was recorded
+        # Verify the mock was actually called (debugging for CI)
+        self.assertGreater(
+            len(attempted_folders),
+            0,
+            "Mock rmdir should have been called at least once",
+        )
+
+        # Verify the failing folder was attempted
+        self.assertIn(
+            failing_folder_path_str,
+            attempted_folders,
+            f"Failing folder {failing_folder_path_str} should have been attempted. "
+            f"Attempted: {attempted_folders}",
+        )
+
+        # Verify the error was recorded in the response
+        # Note: The error should be recorded even if it doesn't count toward batch limit
+        if data["errors"] == 0:
+            # If no errors were recorded, check if the mock was actually called
+            # This helps debug CI failures
+            self.fail(
+                f"Expected at least 1 error, but got 0. "
+                f"Attempted folders: {attempted_folders}, "
+                f"Successful deletions: {successful_deletions}, "
+                f"Response data: {data}"
+            )
         self.assertGreater(
             data["errors"],
             0,
             "Error should be recorded in response",
         )
 
+        # Verify error details contain information about the failing folder
+        self.assertGreater(
+            len(data["error_details"]),
+            0,
+            "Error details should be included in response",
+        )
+
+        # Verify that the failing folder path appears in error details
+        error_details_str = " ".join(data["error_details"])
+        self.assertIn(
+            "error_batch_test3",
+            error_details_str,
+            "Error details should mention the failing folder",
+        )
+
         # Clean up the remaining folder
-        folders[2].rmdir()
+        failing_folder.rmdir()
 
     def test_symlink_to_empty_directory_not_marked_as_empty(self):
         """Test that folders containing symlinks to directories are not marked as empty"""
