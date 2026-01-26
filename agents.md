@@ -295,7 +295,9 @@ make ci-check
 3. **Re-run Make Check**: Run `make check` again to verify all issues are resolved
 4. **Run Tests**: Execute `make test` to run unit tests and ensure they pass
 5. **Run Pre-commit**: Execute `pre-commit run --all-files` or `make pre-commit-run`
-6. **Update Docs**: Update README.md if adding new features
+6. **Update README**: **ALWAYS** update README.md when adding new endpoints, routes, or features. Include:
+   - Endpoint path and method in the API Endpoints section
+   - Full documentation with usage examples, configuration, and response formats
 7. **Review Changes**: Review all changes before committing
 
 **Note**: The `make check` command runs both formatting (Black) and linting (Flake8) in sequence. If linting errors remain after formatting, use `make lint-fix` to attempt automatic fixes before manually addressing any remaining issues. **All tests MUST pass before committing.**
@@ -368,7 +370,13 @@ When adding new API endpoints:
 2. **Add Documentation**: Include comprehensive docstrings
 3. **Add Tests**: Create comprehensive test coverage
 4. **Add Metrics**: Record Prometheus metrics
-5. **Update README**: Document the endpoint in README.md
+5. **Update README**: **ALWAYS** document the endpoint in README.md with:
+   - Endpoint path and HTTP method
+   - Description of what it does
+   - Configuration requirements (environment variables)
+   - Usage examples with curl commands
+   - Response format examples
+   - Feature list
 6. **Error Handling**: Implement proper error handling
 7. **Validation**: Validate all inputs
 8. **Skip Existing**: For copy/move operations, skip existing destination files/folders rather than overwriting (log skipped items in response and metrics)
@@ -387,7 +395,7 @@ Before submitting code, ensure:
 - [ ] `make test` passes (all unit tests must pass)
 - [ ] All pre-commit hooks pass (`make pre-commit-run`)
 - [ ] New features have tests
-- [ ] Documentation is updated (README.md)
+- [ ] **README.md is updated with new endpoint documentation** (endpoint path, usage examples, configuration, response format)
 - [ ] Prometheus metrics are added (if applicable)
 - [ ] Error handling is implemented
 - [ ] Code follows project patterns
@@ -413,7 +421,7 @@ Agents working on this project must:
 5. **Always** format code with Black (via `make format` or `make check`)
 6. **Always** lint code with Flake8 (via `make lint` or `make check`)
 7. **Always** write tests for new features
-8. **Always** update documentation
+8. **Always** update README.md when adding new endpoints or routes (include endpoint path, usage examples, configuration, response format)
 9. **Always** follow project patterns and conventions
 10. **Always** keep files under 500 lines when possible, split larger files
 11. **Never** skip pre-commit hooks
@@ -421,7 +429,8 @@ Agents working on this project must:
 13. **Never** commit code that doesn't pass linting
 14. **Never** commit code if tests fail (`make test` must pass)
 15. **Never** commit code without tests
-16. **Never** hardcode paths or configuration values
-17. **Never** create files larger than 1000 lines in a single PR
+16. **Never** commit code without updating README.md for new endpoints
+17. **Never** hardcode paths or configuration values
+18. **Never** create files larger than 1000 lines in a single PR
 
 By following these guidelines, agents ensure code quality, maintainability, and consistency across the project.
