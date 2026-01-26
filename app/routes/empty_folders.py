@@ -205,7 +205,6 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
 
         removed_folders = []
         errors = []
-        processed_count = 0
         # batch_limit_reached is True if:
         # - batch_size > 0 (a limit was set)
         # - We found exactly batch_size folders (scan stopped at limit)
@@ -240,7 +239,6 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
                     removed_folders.append(
                         str(folder_path.relative_to(target_path))
                     )
-                    processed_count += 1
                     logger.info(
                         f"Successfully finished removing empty folder: {folder_path.relative_to(target_path)}"
                     )
@@ -277,7 +275,6 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
                 logger.info(
                     f"DRY RUN: Would remove empty folder: {folder_path.relative_to(target_path)}"
                 )
-                processed_count += 1
 
         # Record metrics for found folders
         empty_folders_found_total.labels(
