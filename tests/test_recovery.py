@@ -1,7 +1,9 @@
+import errno
 import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -676,3 +678,45 @@ class TestSubtitleSalvage(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["batch_size"], 1)
+
+    def test_salvage_subtitle_folders_stale_file_handle_error(self):
+        """Test that stale file handle errors are handled correctly"""
+        # Mock iterdir() to raise OSError with ESTALE errno
+        with patch.object(
+            Path,
+            "iterdir",
+            side_effect=OSError(errno.ESTALE, "Stale file handle"),
+        ):
+            response = client.post("/api/v1/salvage/subtitle-folders")
+            self.assertEqual(response.status_code, 503)
+            data = response.json()
+
+            # Check error message
+            self.assertIn("detail", data)
+            self.assertIn("Stale file handle", data["detail"])
+            self.assertIn("network filesystem mount issue", data["detail"])
+
+            # Check metrics
+            metrics_response = client.get("/metrics")
+            metrics_text = metrics_response.text
+
+            # Should have stale_file_handle error metric
+            self.assertIn("brronson_salvage_errors_total", metrics_text)
+            recycled_path_resolved = normalize_path_for_metrics(
+                self.recycled_dir
+            )
+            salvaged_path_resolved = normalize_path_for_metrics(
+                self.salvaged_dir
+            )
+
+            # Check that stale_file_handle error was recorded
+            assert_metric_with_labels(
+                metrics_text,
+                "brronson_salvage_errors_total",
+                {
+                    "recycled_directory": recycled_path_resolved,
+                    "salvaged_directory": salvaged_path_resolved,
+                    "error_type": "stale_file_handle",
+                },
+                "1.0",
+            )
