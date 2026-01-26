@@ -163,7 +163,11 @@ This command:
 ### Testing
 
 - **Test Coverage**: All new features must have corresponding tests
-- **Test Naming**: Use descriptive test names (e.g., `test_recover_subtitle_folders_dry_run`)
+- **Test New Code**: When adding new code, functions, or endpoints, write tests to verify they work correctly
+- **Test New Conditions**: When adding new error conditions, exception handlers, or conditional logic, write tests to verify each condition is handled correctly
+- **Test Error Cases**: Test both success and error paths, including edge cases and error conditions
+- **Test Cross-Platform**: When adding platform-specific code (e.g., errno handling), test that it works correctly across platforms
+- **Test Naming**: Use descriptive test names (e.g., `test_recover_subtitle_folders_dry_run`, `test_salvage_stale_file_handle_error`)
 - **Test Organization**: Group related tests in test classes
 - **Test Data**: Use temporary directories for file system tests
 - **Test Cleanup**: Always clean up test data in `tearDown` methods

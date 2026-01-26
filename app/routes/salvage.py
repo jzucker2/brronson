@@ -1,5 +1,6 @@
 """Subtitle salvage endpoints."""
 
+import errno
 import logging
 import os
 import shutil
@@ -109,7 +110,7 @@ async def salvage_subtitle_folders(
                     folders_to_check.append(item)
         except OSError as e:
             # Handle stale file handle errors (common with NFS mounts)
-            if e.errno == 116:  # Stale file handle
+            if e.errno == errno.ESTALE:
                 salvage_errors_total.labels(
                     recycled_directory=recycled_dir,
                     salvaged_directory=salvaged_dir,
@@ -124,16 +125,8 @@ async def salvage_subtitle_folders(
                         f"and try again."
                     ),
                 )
-            # Re-raise other OSError exceptions
-            salvage_errors_total.labels(
-                recycled_directory=recycled_dir,
-                salvaged_directory=salvaged_dir,
-                error_type="directory_read_error",
-            ).inc()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error reading recycled directory: {str(e)}",
-            )
+            # Fall through to generic error handling for other OSError cases
+            raise
         except Exception as e:
             salvage_errors_total.labels(
                 recycled_directory=recycled_dir,
