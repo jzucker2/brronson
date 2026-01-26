@@ -125,8 +125,17 @@ async def salvage_subtitle_folders(
                         f"and try again."
                     ),
                 )
-            # Fall through to generic error handling for other OSError cases
-            raise
+            # Handle other OSError cases with generic error handling
+            # (don't re-raise, let it fall through to Exception handler)
+            salvage_errors_total.labels(
+                recycled_directory=recycled_dir,
+                salvaged_directory=salvaged_dir,
+                error_type="directory_read_error",
+            ).inc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error reading recycled directory: {str(e)}",
+            )
         except Exception as e:
             salvage_errors_total.labels(
                 recycled_directory=recycled_dir,
