@@ -9,7 +9,7 @@ from prometheus_fastapi_instrumentator import Instrumentator, metrics
 from . import logging_config  # noqa: F401 - Import to setup logging
 from .config import get_cleanup_directory, get_target_directory
 from .metrics import brronson_info
-from .routes import cleanup, comparison, health, move, salvage
+from .routes import cleanup, comparison, empty_folders, health, move, salvage
 from .version import version
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,7 @@ app.include_router(cleanup.router)
 app.include_router(comparison.router)
 app.include_router(move.router)
 app.include_router(salvage.router)
+app.include_router(empty_folders.router)
 
 if __name__ == "__main__":
     import uvicorn
