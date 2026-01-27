@@ -227,18 +227,27 @@ async def migrate_non_movie_folders(
     try:
         target_path = Path(target_dir).resolve()
         logger.info(f"Validating target directory: {target_path}")
-        validate_directory(target_path, target_dir, "scan")
+        validate_directory(target_path, target_dir, "migrate")
         logger.info(f"Target directory validation successful: {target_path}")
 
         migrated_path = Path(migrated_dir).resolve()
         logger.info(f"Validating migrated directory: {migrated_path}")
-        validate_directory(migrated_path, migrated_dir, "scan")
+
+        # Ensure migrated directory exists (create if it doesn't)
+        try:
+            migrated_path.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError):
+            # If directory creation fails, validate_directory will handle the 404
+            pass
+
+        # Validate migrated directory (after attempting to create it)
+        validate_directory(migrated_path, migrated_dir, "migrate")
         logger.info(
             f"Migrated directory validation successful: {migrated_path}"
         )
     except HTTPException:
         # validate_directory already recorded the error in the correct metric
-        # (empty_folders_errors_total), so we just re-raise
+        # (migrate_errors_total), so we just re-raise
         raise
     except Exception as e:
         # For any other unexpected exceptions, record in migrate_errors_total
