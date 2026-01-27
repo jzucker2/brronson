@@ -225,4 +225,41 @@ empty_folders_batch_operations_total = Counter(
     ["target_directory", "batch_size", "dry_run"],
 )
 
+# Custom Prometheus metrics for migrate non-movie folders operations
+migrate_folders_found_total = Counter(
+    "brronson_migrate_folders_found_total",
+    "Total number of folders without movie files found",
+    ["target_directory", "dry_run"],
+)
+
+migrate_folders_moved_total = Counter(
+    "brronson_migrate_folders_moved_total",
+    "Total number of folders successfully moved to migrated directory",
+    ["target_directory", "migrated_directory", "dry_run"],
+)
+
+migrate_folders_skipped_total = Counter(
+    "brronson_migrate_folders_skipped_total",
+    "Total number of folders skipped during migration (target already exists)",
+    ["target_directory", "migrated_directory", "dry_run"],
+)
+
+migrate_errors_total = Counter(
+    "brronson_migrate_errors_total",
+    "Total errors during folder migration operations",
+    ["target_directory", "migrated_directory", "error_type"],
+)
+
+migrate_operation_duration = Histogram(
+    "brronson_migrate_operation_duration_seconds",
+    "Time spent on folder migration operations",
+    ["operation_type", "target_directory", "migrated_directory"],
+)
+
+migrate_batch_operations_total = Counter(
+    "brronson_migrate_batch_operations_total",
+    "Total number of batch operations performed",
+    ["target_directory", "migrated_directory", "batch_size", "dry_run"],
+)
+
 brronson_info = Gauge("brronson_info", "Info about the server", ["version"])

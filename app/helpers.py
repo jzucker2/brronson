@@ -8,14 +8,17 @@ from typing import List
 from fastapi import HTTPException
 
 from .config import (
+    get_migrated_movies_directory,
     get_recycled_movies_directory,
     get_salvaged_movies_directory,
+    get_target_directory,
 )
 from .metrics import (
     cleanup_directory_size_bytes,
     cleanup_errors_total,
     comparison_errors_total,
     empty_folders_errors_total,
+    migrate_errors_total,
     scan_directory_size_bytes,
     scan_errors_total,
     salvage_errors_total,
@@ -34,7 +37,7 @@ def validate_directory(
     Args:
         directory_path: Path to the directory to validate
         cleanup_dir: String representation of the cleanup directory for error messages  # noqa: E501
-        operation_type: Type of operation ("scan", "cleanup", "comparison", "salvage", or "empty_folders") for metrics
+        operation_type: Type of operation ("scan", "cleanup", "comparison", "salvage", "empty_folders", or "migrate") for metrics
 
     Raises:
         HTTPException: If directory validation fails
@@ -56,6 +59,41 @@ def validate_directory(
             empty_folders_errors_total.labels(
                 target_directory=cleanup_dir, error_type="directory_not_found"
             ).inc()
+        elif operation_type == "migrate":
+            # For migrate operations, we need to determine which directory failed
+            # Use resolved path comparison to avoid substring false positives
+            target_dir = get_target_directory()
+            migrated_dir = get_migrated_movies_directory()
+            target_path_resolved = str(Path(target_dir).resolve())
+            migrated_path_resolved = str(Path(migrated_dir).resolve())
+            dir_str_resolved = str(directory_path.resolve())
+
+            # Determine which directory this is using exact path comparison
+            if (
+                dir_str_resolved == target_path_resolved
+                or dir_str_resolved.startswith(target_path_resolved + "/")
+            ):
+                migrate_errors_total.labels(
+                    target_directory=target_dir,
+                    migrated_directory=migrated_dir,
+                    error_type="target_directory_not_found",
+                ).inc()
+            elif (
+                dir_str_resolved == migrated_path_resolved
+                or dir_str_resolved.startswith(migrated_path_resolved + "/")
+            ):
+                migrate_errors_total.labels(
+                    target_directory=target_dir,
+                    migrated_directory=migrated_dir,
+                    error_type="migrated_directory_not_found",
+                ).inc()
+            else:
+                # Fallback: if we can't determine, use a generic error type
+                migrate_errors_total.labels(
+                    target_directory=target_dir,
+                    migrated_directory=migrated_dir,
+                    error_type="directory_not_found",
+                ).inc()
         elif operation_type == "salvage":
             # For salvage operations, we need to determine which directory failed
             # Use resolved path comparison to avoid substring false positives
@@ -135,6 +173,14 @@ def validate_directory(
                 elif operation_type == "empty_folders":
                     empty_folders_errors_total.labels(
                         target_directory=cleanup_dir,
+                        error_type="protected_system_location",
+                    ).inc()
+                elif operation_type == "migrate":
+                    target_dir = get_target_directory()
+                    migrated_dir = get_migrated_movies_directory()
+                    migrate_errors_total.labels(
+                        target_directory=target_dir,
+                        migrated_directory=migrated_dir,
                         error_type="protected_system_location",
                     ).inc()
                 raise HTTPException(

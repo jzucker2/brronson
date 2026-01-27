@@ -85,6 +85,7 @@ A simple self hosted application for helping with media management for the -arr 
 - `GET /api/v1/compare/directories` - Compare subdirectories between directories
 - `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories between directories
 - `POST /api/v1/salvage/subtitle-folders` - Salvage folders with subtitles from recycled movies directory
+- `POST /api/v1/migrate/non-movie-folders` - Move folders without movie files to migrated directory
 
 ### File Cleanup Endpoints
 
@@ -491,6 +492,181 @@ The move operation now includes automatic cleanup by default:
 - Uses existing directory validation and security checks
 - Cleanup failures don't prevent move operations from continuing
 
+### Non-Movie Folder Migration Endpoints
+
+- `POST /api/v1/migrate/non-movie-folders` - Move folders without movie files to migrated directory
+
+#### Non-Movie Folder Migration Usage
+
+The non-movie folder migration endpoint helps move folders that contain files but no movie files (like .avi, .mkv, .mp4, etc.) from the target directory to the migrated movies directory. This is useful for organizing folders that don't contain actual movie content.
+
+**Configuration:**
+
+- `TARGET_DIRECTORY` - Directory to scan for folders without movie files (default: `/target`)
+- `MIGRATED_MOVIES_DIRECTORY` - Destination directory for folders without movie files (default: `/migrated/movies`)
+
+**Migrate folders without movie files (dry run - default):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders"
+```
+
+**Migrate folders without movie files (actual move):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false"
+```
+
+**Use batch_size for re-entrant operations:**
+
+```bash
+# Move up to 50 folders per request (skipped folders don't count)
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&batch_size=50"
+```
+
+**Response format:**
+
+```json
+{
+  "target_directory": "/path/to/target",
+  "migrated_directory": "/path/to/migrated",
+  "dry_run": true,
+  "batch_size": 100,
+  "folders_found": 5,
+  "folders_moved": 0,
+  "folders_skipped": 0,
+  "errors": 0,
+  "batch_limit_reached": false,
+  "remaining_folders": 0,
+  "folders_to_migrate": ["folder1", "folder2", "folder3"],
+  "moved_folders": [],
+  "skipped_folders": [],
+  "error_details": []
+}
+```
+
+**Features:**
+
+- **Movie File Detection**: Identifies folders that contain files but no movie files based on extension list
+- **Empty Folders Excluded**: Only migrates folders that contain at least one file; empty folders are left for the `/api/v1/cleanup/empty-folders` endpoint
+- **First-Level Only**: Scans only immediate subdirectories of the target directory
+- **Safe by Default**: Default `dry_run=true` prevents accidental moves
+- **Batch Processing**: Default `batch_size=100` allows processing in batches for re-entrant operations
+- **Re-entrant**: Can be called multiple times to resume from where it stopped
+- **Skip Existing**: If a destination folder already exists, it is skipped (not overwritten) and logged
+- **Error Handling**: Comprehensive error reporting for failed moves
+- **Progress Tracking**: `remaining_folders` field shows how many folders still need to be processed
+- **Prometheus Metrics**: Records found, moved, skipped, and error metrics
+
+**Movie File Extensions:**
+
+The endpoint recognizes the following movie file extensions:
+
+- `.avi`, `.mkv`, `.mp4`, `.m4v`, `.mov`, `.wmv`, `.flv`, `.webm`
+- `.mpg`, `.mpeg`, `.m2v`, `.3gp`, `.ogv`, `.divx`, `.xvid`
+- `.rm`, `.rmvb`, `.vob`, `.ts`, `.mts`, `.m2ts`
+
+**How It Works:**
+
+The migrate endpoint processes folders in a specific way to ensure safe and predictable behavior:
+
+1. **Only First-Level Subdirectories**: The endpoint only scans immediate subdirectories of the target directory (first-level only). It does not process nested subdirectories separately.
+
+2. **Recursive Movie File Check**: For each first-level subdirectory, the endpoint recursively checks the entire folder tree to see if it contains any movie files anywhere within it.
+
+3. **Entire Folder Migration**: If a first-level subdirectory contains no movie files anywhere within it, the entire first-level subdirectory (including all nested content) is moved as one unit.
+
+4. **Nested Folders Not Processed Separately**: Nested subdirectories are never processed individually - they only move as part of their parent first-level folder.
+
+**Examples:**
+
+**Example 1: Simple Case**
+
+```text
+/target/
+  ├── folder_a/
+  │   └── file.txt          ← No movie files
+  └── folder_b/
+      └── movie.mp4         ← Has movie file
+```
+
+- `folder_a` → **MIGRATED** (no movies found)
+- `folder_b` → **NOT migrated** (has movie.mp4)
+
+**Example 2: Nested Structure**
+
+```text
+/target/
+  ├── folder_a/
+  │   ├── subfolder/
+  │   │   └── file.txt      ← No movie files anywhere
+  │   └── readme.txt
+  └── folder_b/
+      ├── subfolder/
+      │   └── movie.mkv    ← Has movie file
+      └── file.txt
+```
+
+- `folder_a` → **MIGRATED** (entire folder_a, including subfolder, moved)
+- `folder_b` → **NOT migrated** (has movie.mkv in subfolder)
+
+**Example 3: Movie at Same Level as Nested Folder**
+
+```text
+/target/
+  ├── folder_a/
+  │   ├── subfolder/
+  │   │   └── file.txt      ← No movie files
+  │   └── movie.mp4         ← Has movie file at first level
+  └── folder_b/
+      └── subfolder/
+          └── file.txt      ← No movie files anywhere
+```
+
+- `folder_a` → **NOT migrated** (has movie.mp4, even though subfolder has no movies)
+- `folder_b` → **MIGRATED** (entire folder_b, including subfolder, moved)
+
+**Example 4: Multiple Nested Levels**
+
+```text
+/target/
+  └── folder_a/
+      ├── level1/
+      │   └── level2/
+      │       └── level3/
+      │           └── file.txt    ← No movie files anywhere
+      └── readme.txt
+```
+
+- `folder_a` → **MIGRATED** (entire folder_a, including all nested levels, moved as one unit)
+
+**Example 5: Mixed Content**
+
+```text
+/target/
+  ├── folder_a/
+  │   ├── file1.txt
+  │   ├── file2.jpg
+  │   └── subfolder/
+  │       └── file3.txt     ← No movie files anywhere
+  └── folder_b/
+      ├── file1.txt
+      └── subfolder/
+          └── movie.avi     ← Has movie file
+```
+
+- `folder_a` → **MIGRATED** (no movies found anywhere in folder_a)
+- `folder_b` → **NOT migrated** (has movie.avi in subfolder)
+
+**Key Points:**
+
+- ✅ **Only first-level subdirectories are considered** - Nested folders like `folder_a/subfolder` are never processed separately
+- ✅ **Recursive movie file check** - If `folder_a` contains a movie anywhere (even deep in nested subdirectories), `folder_a` is NOT migrated
+- ✅ **Entire folder moves** - If `folder_a` has no movies, the whole `folder_a` (including all nested content) is moved
+- ✅ **Nested folders never move individually** - They only move as part of their parent first-level folder
+
+This design ensures that if a first-level folder has no movie files anywhere within it, the entire folder (and all its nested content) is moved as one atomic unit, preventing partial moves and maintaining folder structure integrity.
+
 ## Monitoring
 
 ### Health Check
@@ -553,6 +729,15 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `brronson_empty_folders_errors_total` - Total errors during empty folder cleanup operations (labels: target_directory, error_type)
 - `brronson_empty_folders_operation_duration_seconds` - Time spent on empty folder cleanup operations (labels: operation_type, target_directory)
 - `brronson_empty_folders_batch_operations_total` - Total number of batch operations performed (labels: target_directory, batch_size, dry_run)
+
+#### Non-Movie Folder Migration Metrics
+
+- `brronson_migrate_folders_found_total` - Total number of folders without movie files found (labels: target_directory, dry_run)
+- `brronson_migrate_folders_moved_total` - Total number of folders successfully moved to migrated directory (labels: target_directory, migrated_directory, dry_run)
+- `brronson_migrate_folders_skipped_total` - Total number of folders skipped during migration (target already exists) (labels: target_directory, migrated_directory, dry_run)
+- `brronson_migrate_errors_total` - Total errors during folder migration operations (labels: target_directory, migrated_directory, error_type)
+- `brronson_migrate_operation_duration_seconds` - Time spent on folder migration operations (labels: operation_type, target_directory, migrated_directory)
+- `brronson_migrate_batch_operations_total` - Total number of batch operations performed (labels: target_directory, migrated_directory, batch_size, dry_run)
 
 ## Deployment
 
