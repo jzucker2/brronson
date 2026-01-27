@@ -225,19 +225,24 @@ class TestNonMovieFolderMigration(unittest.TestCase):
             str(data["folders_moved"]),
         )
 
-    def test_migrate_preserves_path_structure(self):
-        """Test that folders with same name at different paths don't collide"""
+    def test_migrate_first_level_subdirectories_only(self):
+        """Test that only first-level subdirectories are migrated"""
         # First, clean up existing folders from setUp
         client.post("/api/v1/migrate/non-movie-folders?dry_run=false")
 
-        # Create two folders with the same name at different paths
-        (self.test_path / "a").mkdir()
-        (self.test_path / "a" / "common").mkdir()
-        (self.test_path / "a" / "common" / "file1.txt").touch()
+        # Create first-level subdirectories
+        # "folder_a" has no movies - should be migrated
+        (self.test_path / "folder_a").mkdir()
+        (self.test_path / "folder_a" / "file1.txt").touch()
 
-        (self.test_path / "b").mkdir()
-        (self.test_path / "b" / "common").mkdir()
-        (self.test_path / "b" / "common" / "file2.txt").touch()
+        # "folder_b" has a movie - should NOT be migrated
+        (self.test_path / "folder_b").mkdir()
+        (self.test_path / "folder_b" / "movie.mp4").touch()
+
+        # "folder_c" has nested subdir with no movies - entire folder_a should be migrated
+        (self.test_path / "folder_c").mkdir()
+        (self.test_path / "folder_c" / "sub").mkdir()
+        (self.test_path / "folder_c" / "sub" / "file2.txt").touch()
 
         response = client.post(
             "/api/v1/migrate/non-movie-folders?dry_run=false"
@@ -245,24 +250,22 @@ class TestNonMovieFolderMigration(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
-        # Both folders should be moved, preserving their path structure
+        # Should migrate folder_a and folder_c (no movies), but not folder_b (has movie)
         self.assertEqual(data["folders_moved"], 2)
-        self.assertIn("a/common", data["moved_folders"])
-        self.assertIn("b/common", data["moved_folders"])
+        self.assertIn("folder_a", data["moved_folders"])
+        self.assertIn("folder_c", data["moved_folders"])
+        self.assertNotIn("folder_b", data["moved_folders"])
 
-        # Verify both folders exist in migrated directory with preserved paths
-        self.assertTrue((self.migrated_path / "a" / "common").exists())
-        self.assertTrue((self.migrated_path / "b" / "common").exists())
-        self.assertTrue(
-            (self.migrated_path / "a" / "common" / "file1.txt").exists()
-        )
-        self.assertTrue(
-            (self.migrated_path / "b" / "common" / "file2.txt").exists()
-        )
+        # Verify migrated folders
+        self.assertTrue((self.migrated_path / "folder_a").exists())
+        self.assertTrue((self.migrated_path / "folder_c").exists())
+        self.assertTrue((self.migrated_path / "folder_c" / "sub").exists())
+        self.assertFalse((self.migrated_path / "folder_b").exists())
 
-        # Verify original folders are gone
-        self.assertFalse((self.test_path / "a" / "common").exists())
-        self.assertFalse((self.test_path / "b" / "common").exists())
+        # Verify original folders are gone (except folder_b which has a movie)
+        self.assertFalse((self.test_path / "folder_a").exists())
+        self.assertFalse((self.test_path / "folder_c").exists())
+        self.assertTrue((self.test_path / "folder_b").exists())
 
     def test_migrate_excludes_migrated_directory(self):
         """Test that migrated directory is excluded from scan if inside target"""

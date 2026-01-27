@@ -82,16 +82,17 @@ def find_folders_without_movies(
     exclude_path: Path = None,
 ) -> List[Path]:
     """
-    Recursively find folders that contain files but no movie files.
+    Find first-level subdirectories that contain no movie files.
 
-    This function scans the target directory and identifies folders that:
-    - Contain at least one file (not empty)
-    - Do not contain any movie files (based on extension list)
+    This function scans only the immediate subdirectories of the target directory
+    and identifies those that:
+    - Are first-level subdirectories (immediate children of target directory)
+    - Do not contain any movie files anywhere within them (checked recursively)
 
     Args:
         directory_path: Path to the directory to scan
         max_folders: Maximum number of folders to find. If None,
-                    scans the entire directory. If provided (> 0), stops
+                    scans all first-level subdirectories. If provided (> 0), stops
                     scanning once this many folders are found.
         movie_extensions: Set of movie file extensions to check for.
                          If None, uses DEFAULT_MOVIE_EXTENSIONS.
@@ -99,7 +100,7 @@ def find_folders_without_movies(
                      directory if it's inside the target directory).
 
     Returns:
-        List of Path objects for folders without movie files
+        List of Path objects for first-level subdirectories without movie files
     """
     if movie_extensions is None:
         movie_extensions = {ext.lower() for ext in DEFAULT_MOVIE_EXTENSIONS}
@@ -109,22 +110,20 @@ def find_folders_without_movies(
     resolved_exclude = exclude_path.resolve() if exclude_path else None
 
     logger.info(
-        f"Starting directory walk for folders without movies: {directory_path} "
+        f"Starting scan for first-level subdirectories without movies: {directory_path} "
         f"(max_folders={max_folders}, exclude_path={exclude_path})"
     )
 
-    directories_scanned = 0
     try:
-        # Walk through directory from top to bottom
-        for root, dirs, files in os.walk(directory_path):
-            directories_scanned += 1
-            # Log progress every 1000 directories scanned
-            if directories_scanned % 1000 == 0:
-                logger.info(
-                    f"Scanning progress: {directories_scanned} directories scanned, "
-                    f"{len(folders_without_movies)} folders without movies found so far"
-                )
+        # Only iterate over immediate subdirectories (first level only)
+        items = list(directory_path.iterdir())
+        subdirectories = [item for item in items if item.is_dir()]
 
+        logger.info(
+            f"Found {len(subdirectories)} first-level subdirectories to check"
+        )
+
+        for subdir_path in subdirectories:
             # Stop scanning if we've reached the maximum number of folders
             if (
                 max_folders is not None
@@ -132,69 +131,54 @@ def find_folders_without_movies(
             ):
                 logger.info(
                     f"Reached max_folders limit ({max_folders}): stopping scan "
-                    f"after scanning {directories_scanned} directories"
+                    f"after checking {len(folders_without_movies)} folders"
                 )
                 break
 
-            root_path = Path(root).resolve()
-
-            # CRITICAL: Never include the target directory itself in results
-            # This prevents accidental migration of the configured root directory
-            if root_path == resolved_target:
-                continue
+            resolved_subdir = subdir_path.resolve()
 
             # CRITICAL: Never include the excluded path (e.g., migrated directory)
             # if it's inside the target directory. This prevents attempting to
             # move the migrated directory into itself.
             if resolved_exclude and (
-                root_path == resolved_exclude
-                or root_path.is_relative_to(resolved_exclude)
+                resolved_subdir == resolved_exclude
+                or resolved_subdir.is_relative_to(resolved_exclude)
             ):
+                logger.info(
+                    f"Skipping excluded path: {subdir_path.relative_to(directory_path)}"
+                )
                 continue
 
-            # Check if directory contains files (not empty)
+            # Check if this first-level subdirectory contains any movie files
+            # (recursively check the entire subdirectory tree)
             try:
-                items = list(root_path.iterdir())
-                if len(items) == 0:
-                    # Empty folder - skip (empty folder cleanup handles this)
-                    continue
-
-                # Check if folder contains any files (not just subdirectories)
-                # We only want to migrate folders that actually contain files
-                has_files = any(item.is_file() for item in items)
-                if not has_files:
-                    # Folder only contains subdirectories, skip it
-                    # (subdirectories will be checked in their own iteration)
-                    continue
-
-                # Check if folder contains any movie files
                 if not folder_contains_movie_files(
-                    root_path, movie_extensions
+                    resolved_subdir, movie_extensions
                 ):
-                    # Folder has files but no movie files - add to list
-                    folders_without_movies.append(root_path)
-                    # Stop scanning if we've reached the maximum number of folders
-                    if (
-                        max_folders is not None
-                        and len(folders_without_movies) >= max_folders
-                    ):
-                        break
-            except (OSError, PermissionError):
+                    # First-level subdirectory has no movie files - add to list
+                    folders_without_movies.append(resolved_subdir)
+                    logger.debug(
+                        f"Found folder without movies: {subdir_path.relative_to(directory_path)}"
+                    )
+            except (OSError, PermissionError) as e:
                 # Skip directories we can't read
+                logger.warning(
+                    f"Cannot read subdirectory {subdir_path.relative_to(directory_path)}: {e}"
+                )
                 pass
+
     except KeyboardInterrupt:
         # Allow graceful interruption
         raise
     except Exception as e:
         # Log unexpected errors during scanning
         logger.error(
-            f"Unexpected error during folder scan after scanning "
-            f"{directories_scanned} directories: {str(e)}"
+            f"Unexpected error during folder scan: {str(e)}", exc_info=True
         )
         raise
 
     logger.info(
-        f"Directory walk completed: scanned {directories_scanned} directories, "
+        f"Scan completed: checked {len(subdirectories)} first-level subdirectories, "
         f"found {len(folders_without_movies)} folders without movie files"
     )
 
@@ -316,7 +300,7 @@ async def migrate_non_movie_folders(
         )
         if folders_to_migrate:
             logger.info(
-                f"Folders to migrate: {', '.join([str(f.relative_to(target_path)) for f in folders_to_migrate[:10]])}{'...' if len(folders_to_migrate) > 10 else ''}"
+                f"Folders to migrate: {', '.join([f.name for f in folders_to_migrate[:10]])}{'...' if len(folders_to_migrate) > 10 else ''}"
             )
 
         moved_folders = []
@@ -346,23 +330,20 @@ async def migrate_non_movie_folders(
                 )
                 continue
 
-            # Preserve relative path structure to avoid collisions when folders
-            # with the same name exist at different paths (e.g., /target/a/common
-            # and /target/b/common). Use relative path from target directory.
-            folder_relative = folder_path.relative_to(target_path)
-            target_migrated_path = migrated_path / folder_relative
+            # Since we only process first-level subdirectories, we can use
+            # just the folder name (no need to preserve nested path structure)
+            folder_name = folder_path.name
+            target_migrated_path = migrated_path / folder_name
 
             if not dry_run:
                 try:
                     # Check if destination already exists
                     if target_migrated_path.exists():
                         logger.info(
-                            f"Skipping folder (destination exists): {folder_relative} "
+                            f"Skipping folder (destination exists): {folder_name} "
                             f"-> {target_migrated_path}"
                         )
-                        skipped_folders.append(
-                            str(folder_path.relative_to(target_path))
-                        )
+                        skipped_folders.append(folder_name)
                         migrate_folders_skipped_total.labels(
                             target_directory=target_dir,
                             migrated_directory=migrated_dir,
@@ -373,25 +354,19 @@ async def migrate_non_movie_folders(
                     # Check if source still exists (might have been moved already)
                     if not folder_path.exists():
                         logger.info(
-                            f"Skipping folder (already moved): {folder_path.relative_to(target_path)}"
+                            f"Skipping folder (already moved): {folder_name}"
                         )
                         continue
 
                     logger.info(
-                        f"Starting to move folder: {folder_path.relative_to(target_path)} "
+                        f"Starting to move folder: {folder_name} "
                         f"-> {target_migrated_path}"
-                    )
-                    # Create parent directories if they don't exist (needed for nested paths)
-                    target_migrated_path.parent.mkdir(
-                        parents=True, exist_ok=True
                     )
                     # Use shutil.move for cross-device moves if needed
                     shutil.move(str(folder_path), str(target_migrated_path))
-                    moved_folders.append(
-                        str(folder_path.relative_to(target_path))
-                    )
+                    moved_folders.append(folder_name)
                     logger.info(
-                        f"Successfully finished moving folder: {folder_path.relative_to(target_path)}"
+                        f"Successfully finished moving folder: {folder_name}"
                     )
                     migrate_folders_moved_total.labels(
                         target_directory=target_dir,
@@ -430,7 +405,7 @@ async def migrate_non_movie_folders(
                     # won't block progress on other folders.
             else:
                 logger.info(
-                    f"DRY RUN: Would move folder: {folder_path.relative_to(target_path)} "
+                    f"DRY RUN: Would move folder: {folder_name} "
                     f"-> {target_migrated_path}"
                 )
 
