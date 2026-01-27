@@ -1,8 +1,10 @@
 """Empty folder cleanup endpoints."""
 
+import asyncio
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List
 
@@ -21,6 +23,12 @@ from ..metrics import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Thread pool executor for running blocking I/O operations
+# This prevents blocking the async event loop during long-running scans
+_executor = ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="empty_folders"
+)
 
 
 def find_empty_folders(
@@ -236,8 +244,16 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
             f"Starting empty folder scan in {target_path} "
             f"(max_folders={max_folders_to_scan})"
         )
-        empty_folders = find_empty_folders(
-            target_path, max_folders=max_folders_to_scan
+        # Run the blocking scan in a thread pool to prevent worker timeout
+        # This allows the async event loop to handle other requests while scanning
+        # The scan can take a long time on large directories, so running it in a
+        # separate thread prevents blocking the worker and causing timeouts
+        loop = asyncio.get_running_loop()
+        empty_folders = await loop.run_in_executor(
+            _executor,
+            find_empty_folders,
+            target_path,
+            max_folders_to_scan,
         )
 
         logger.info(

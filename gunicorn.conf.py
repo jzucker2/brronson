@@ -23,7 +23,9 @@ max_requests_jitter = 50
 preload_app = True
 
 # Timeout settings
-timeout = 120
+# Allow longer timeouts for operations like empty folder cleanup on large directories
+# Can be overridden with GUNICORN_TIMEOUT environment variable
+timeout = int(os.getenv("GUNICORN_TIMEOUT", "600"))  # Default 10 minutes
 keepalive = 2
 graceful_timeout = 30
 
