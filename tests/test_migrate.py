@@ -172,16 +172,19 @@ class TestNonMovieFolderMigration(unittest.TestCase):
         self.assertTrue((self.migrated_path / "to_migrate").exists())
 
     def test_migrate_non_movie_folders_nested(self):
-        """Test that nested folders without movies are found"""
+        """Test that first-level folders with nested subdirectories are migrated"""
         response = client.post(
             "/api/v1/migrate/non-movie-folders?dry_run=false"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
-        # Should find nested folder without movie
+        # Should find first-level "nested" folder (which contains subfolder)
+        # The entire "nested" folder should be migrated, not just "subfolder"
         folder_names = [Path(f).name for f in data["folders_to_migrate"]]
-        self.assertIn("subfolder", folder_names)
+        self.assertIn("nested", folder_names)
+        # "subfolder" is nested inside "nested", so it won't be processed separately
+        self.assertNotIn("subfolder", folder_names)
 
     def test_migrate_non_movie_folders_metrics(self):
         """Test that metrics are recorded correctly"""

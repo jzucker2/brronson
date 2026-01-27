@@ -106,7 +106,6 @@ def find_folders_without_movies(
         movie_extensions = {ext.lower() for ext in DEFAULT_MOVIE_EXTENSIONS}
 
     folders_without_movies = []
-    resolved_target = directory_path.resolve()
     resolved_exclude = exclude_path.resolve() if exclude_path else None
 
     logger.info(
@@ -271,8 +270,7 @@ async def migrate_non_movie_folders(
         # If batch_size is 0 or None, scan the entire directory
         max_folders_to_scan = batch_size if batch_size > 0 else None
         logger.info(
-            f"Starting folder scan in {target_path} "
-            f"(max_folders={max_folders_to_scan})"
+            f"Starting folder scan in {target_path} (max_folders={max_folders_to_scan})"
         )
         # Run the blocking scan in a thread pool to prevent worker timeout
         # This allows the async event loop to handle other requests while scanning
