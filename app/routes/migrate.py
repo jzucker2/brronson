@@ -49,6 +49,25 @@ def is_movie_file(file_path: Path, movie_extensions: Set[str]) -> bool:
     return file_path.suffix.lower() in movie_extensions
 
 
+def folder_contains_any_files(folder_path: Path) -> bool:
+    """
+    Check if a folder (recursively) contains any files.
+
+    Args:
+        folder_path: Path to the folder to check
+
+    Returns:
+        True if the folder contains at least one file, False if empty
+    """
+    try:
+        for _root, _dirs, files in os.walk(folder_path):
+            if files:
+                return True
+    except (OSError, PermissionError):
+        return False
+    return False
+
+
 def folder_contains_movie_files(
     folder_path: Path, movie_extensions: Set[str]
 ) -> bool:
@@ -82,12 +101,15 @@ def find_folders_without_movies(
     exclude_path: Path = None,
 ) -> List[Path]:
     """
-    Find first-level subdirectories that contain no movie files.
+    Find first-level subdirectories that contain files but no movie files.
 
     This function scans only the immediate subdirectories of the target directory
     and identifies those that:
     - Are first-level subdirectories (immediate children of target directory)
+    - Contain at least one file somewhere within them (recursively)
     - Do not contain any movie files anywhere within them (checked recursively)
+
+    Empty folders are excluded; use the empty-folders cleanup endpoint for those.
 
     Args:
         directory_path: Path to the directory to scan
@@ -160,6 +182,16 @@ def find_folders_without_movies(
                 )
                 continue
 
+            # Skip empty folders; they are handled by the empty-folders endpoint
+            try:
+                if not folder_contains_any_files(resolved_subdir):
+                    logger.debug(
+                        f"Skipping empty folder: {subdir_path.relative_to(directory_path)}"
+                    )
+                    continue
+            except (OSError, PermissionError):
+                continue
+
             # Check if this first-level subdirectory contains any movie files
             # (recursively check the entire subdirectory tree)
             try:
@@ -206,8 +238,10 @@ async def migrate_non_movie_folders(
     Find and move folders that contain files but no movie files to migrated directory.
 
     This endpoint:
-    - Scans the target directory recursively
-    - Identifies folders that contain files but no movie files (.avi, .mkv, .mp4, etc)
+    - Scans only first-level subdirectories of the target directory
+    - Identifies folders that contain at least one file and no movie files
+      (.avi, .mkv, .mp4, etc). Empty folders are excluded (use the empty-folders
+      cleanup endpoint for those).
     - Moves those folders to the migrated movies directory
     - Supports batch processing for re-entrant operations
 

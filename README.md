@@ -548,7 +548,8 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
 **Features:**
 
 - **Movie File Detection**: Identifies folders that contain files but no movie files based on extension list
-- **Recursive Scanning**: Scans entire directory structure to find folders without movie files
+- **Empty Folders Excluded**: Only migrates folders that contain at least one file; empty folders are left for the `/api/v1/cleanup/empty-folders` endpoint
+- **First-Level Only**: Scans only immediate subdirectories of the target directory
 - **Safe by Default**: Default `dry_run=true` prevents accidental moves
 - **Batch Processing**: Default `batch_size=100` allows processing in batches for re-entrant operations
 - **Re-entrant**: Can be called multiple times to resume from where it stopped

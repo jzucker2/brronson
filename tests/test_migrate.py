@@ -187,6 +187,35 @@ class TestNonMovieFolderMigration(unittest.TestCase):
         # "subfolder" is nested inside "nested", so it won't be processed separately
         self.assertNotIn("subfolder", folder_names)
 
+    def test_migrate_excludes_empty_folders(self):
+        """Test that empty folders are not included in migration (use empty-folders endpoint)"""
+        client.post("/api/v1/migrate/non-movie-folders?dry_run=false")
+
+        # Create an empty first-level folder
+        (self.test_path / "empty_folder").mkdir()
+        # Create a folder with files but no movies
+        (self.test_path / "has_files_no_movies").mkdir()
+        (self.test_path / "has_files_no_movies" / "readme.txt").touch()
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertNotIn(
+            "empty_folder",
+            data["folders_to_migrate"],
+            "Empty folders should not be migrated",
+        )
+        self.assertIn(
+            "has_files_no_movies",
+            data["folders_to_migrate"],
+            "Folders with files but no movies should be migrated",
+        )
+        self.assertTrue((self.test_path / "empty_folder").exists())
+        self.assertFalse((self.migrated_path / "empty_folder").exists())
+
     def test_migrate_non_movie_folders_metrics(self):
         """Test that metrics are recorded correctly"""
         response = client.post(
