@@ -194,4 +194,35 @@ salvage_operation_duration = Histogram(
     ["operation_type", "recycled_directory", "salvaged_directory"],
 )
 
+# Custom Prometheus metrics for empty folder cleanup operations
+empty_folders_found_total = Counter(
+    "brronson_empty_folders_found_total",
+    "Total number of empty folders found",
+    ["target_directory", "dry_run"],
+)
+
+empty_folders_removed_total = Counter(
+    "brronson_empty_folders_removed_total",
+    "Total number of empty folders successfully removed",
+    ["target_directory", "dry_run"],
+)
+
+empty_folders_errors_total = Counter(
+    "brronson_empty_folders_errors_total",
+    "Total number of errors during empty folder cleanup",
+    ["target_directory", "error_type"],
+)
+
+empty_folders_operation_duration = Histogram(
+    "brronson_empty_folders_operation_duration_seconds",
+    "Time spent on empty folder cleanup operations",
+    ["operation_type", "target_directory"],
+)
+
+empty_folders_batch_operations_total = Counter(
+    "brronson_empty_folders_batch_operations_total",
+    "Total number of batch operations performed",
+    ["target_directory", "batch_size", "dry_run"],
+)
+
 brronson_info = Gauge("brronson_info", "Info about the server", ["version"])

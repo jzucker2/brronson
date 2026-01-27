@@ -15,6 +15,7 @@ from .metrics import (
     cleanup_directory_size_bytes,
     cleanup_errors_total,
     comparison_errors_total,
+    empty_folders_errors_total,
     scan_directory_size_bytes,
     scan_errors_total,
     salvage_errors_total,
@@ -33,7 +34,7 @@ def validate_directory(
     Args:
         directory_path: Path to the directory to validate
         cleanup_dir: String representation of the cleanup directory for error messages  # noqa: E501
-        operation_type: Type of operation ("scan", "cleanup", "comparison", or "salvage") for metrics
+        operation_type: Type of operation ("scan", "cleanup", "comparison", "salvage", or "empty_folders") for metrics
 
     Raises:
         HTTPException: If directory validation fails
@@ -50,6 +51,10 @@ def validate_directory(
         elif operation_type == "comparison":
             comparison_errors_total.labels(
                 directory=cleanup_dir, error_type="directory_not_found"
+            ).inc()
+        elif operation_type == "empty_folders":
+            empty_folders_errors_total.labels(
+                target_directory=cleanup_dir, error_type="directory_not_found"
             ).inc()
         elif operation_type == "salvage":
             # For salvage operations, we need to determine which directory failed
@@ -125,6 +130,11 @@ def validate_directory(
                     salvage_errors_total.labels(
                         recycled_directory=recycled_dir,
                         salvaged_directory=salvaged_dir,
+                        error_type="protected_system_location",
+                    ).inc()
+                elif operation_type == "empty_folders":
+                    empty_folders_errors_total.labels(
+                        target_directory=cleanup_dir,
                         error_type="protected_system_location",
                     ).inc()
                 raise HTTPException(

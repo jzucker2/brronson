@@ -90,6 +90,7 @@ A simple self hosted application for helping with media management for the -arr 
 
 - `GET /api/v1/cleanup/scan` - Scan configured directory for unwanted files (dry run)
 - `POST /api/v1/cleanup/files` - Remove unwanted files from configured directory
+- `POST /api/v1/cleanup/empty-folders` - Remove empty folders from target directory
 
 #### File Cleanup Usage
 
@@ -135,6 +136,63 @@ curl -X POST "http://localhost:1968/api/v1/cleanup/files?dry_run=false" \
 - Critical system directories are protected
 - Recursive search through all subdirectories
 - Detailed response with file counts and error reporting
+
+#### Empty Folder Cleanup Usage
+
+The empty folder cleanup endpoint helps remove empty folders from the target directory. This is useful for cleaning up directory structures after files have been moved or deleted.
+
+**Configuration:**
+
+- `TARGET_DIRECTORY` - Directory to scan for empty folders (default: `/target`)
+
+**Cleanup empty folders (dry run - default):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/cleanup/empty-folders"
+```
+
+**Cleanup empty folders (actual removal):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/cleanup/empty-folders?dry_run=false"
+```
+
+**Use batch_size for re-entrant operations:**
+
+```bash
+# Delete up to 50 empty folders per request
+curl -X POST "http://localhost:1968/api/v1/cleanup/empty-folders?dry_run=false&batch_size=50"
+```
+
+**Response format:**
+
+```json
+{
+  "directory": "/path/to/target",
+  "dry_run": true,
+  "batch_size": 100,
+  "empty_folders_found": 5,
+  "empty_folders_removed": 0,
+  "errors": 0,
+  "batch_limit_reached": false,
+  "remaining_folders": 0,
+  "empty_folders": ["empty1", "nested/empty2", "nested/empty2/empty3"],
+  "removed_folders": [],
+  "error_details": []
+}
+```
+
+**Features:**
+
+- **Recursive Scanning**: Finds all empty folders recursively, including nested structures
+- **Deepest First Processing**: Processes folders from deepest to shallowest to handle nested empty folders correctly
+- **Safe by Default**: Default `dry_run=true` prevents accidental deletions
+- **Batch Processing**: Default `batch_size=100` allows processing in batches for re-entrant operations
+- **Re-entrant**: Can be called multiple times to resume from where it stopped
+- **Nested Folder Handling**: Correctly identifies and removes parent folders that only contain empty subdirectories
+- **Error Handling**: Comprehensive error reporting for failed deletions
+- **Progress Tracking**: `remaining_folders` field shows how many folders still need to be processed
+- **Prometheus Metrics**: Records found, removed, and error metrics
 
 ### Directory Comparison Endpoints
 
@@ -487,6 +545,14 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `brronson_salvage_files_skipped_total` - Total number of subtitle files skipped during salvage (target already exists) (labels: recycled_directory, salvaged_directory, dry_run)
 - `brronson_salvage_errors_total` - Total errors during subtitle salvage operations (labels: recycled_directory, salvaged_directory, error_type)
 - `brronson_salvage_operation_duration_seconds` - Time spent on subtitle salvage operations (labels: operation_type, recycled_directory, salvaged_directory)
+
+#### Empty Folder Cleanup Metrics
+
+- `brronson_empty_folders_found_total` - Total number of empty folders found (labels: target_directory, dry_run)
+- `brronson_empty_folders_removed_total` - Total number of empty folders successfully removed (labels: target_directory, dry_run)
+- `brronson_empty_folders_errors_total` - Total errors during empty folder cleanup operations (labels: target_directory, error_type)
+- `brronson_empty_folders_operation_duration_seconds` - Time spent on empty folder cleanup operations (labels: operation_type, target_directory)
+- `brronson_empty_folders_batch_operations_total` - Total number of batch operations performed (labels: target_directory, batch_size, dry_run)
 
 ## Deployment
 
