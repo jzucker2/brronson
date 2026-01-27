@@ -79,6 +79,7 @@ def find_folders_without_movies(
     directory_path: Path,
     max_folders: int = None,
     movie_extensions: Set[str] = None,
+    exclude_path: Path = None,
 ) -> List[Path]:
     """
     Recursively find folders that contain files but no movie files.
@@ -94,6 +95,8 @@ def find_folders_without_movies(
                     scanning once this many folders are found.
         movie_extensions: Set of movie file extensions to check for.
                          If None, uses DEFAULT_MOVIE_EXTENSIONS.
+        exclude_path: Optional path to exclude from scan results (e.g., migrated
+                     directory if it's inside the target directory).
 
     Returns:
         List of Path objects for folders without movie files
@@ -103,10 +106,11 @@ def find_folders_without_movies(
 
     folders_without_movies = []
     resolved_target = directory_path.resolve()
+    resolved_exclude = exclude_path.resolve() if exclude_path else None
 
     logger.info(
         f"Starting directory walk for folders without movies: {directory_path} "
-        f"(max_folders={max_folders})"
+        f"(max_folders={max_folders}, exclude_path={exclude_path})"
     )
 
     directories_scanned = 0
@@ -139,11 +143,28 @@ def find_folders_without_movies(
             if root_path == resolved_target:
                 continue
 
+            # CRITICAL: Never include the excluded path (e.g., migrated directory)
+            # if it's inside the target directory. This prevents attempting to
+            # move the migrated directory into itself.
+            if resolved_exclude and (
+                root_path == resolved_exclude
+                or root_path.is_relative_to(resolved_exclude)
+            ):
+                continue
+
             # Check if directory contains files (not empty)
             try:
                 items = list(root_path.iterdir())
                 if len(items) == 0:
                     # Empty folder - skip (empty folder cleanup handles this)
+                    continue
+
+                # Check if folder contains any files (not just subdirectories)
+                # We only want to migrate folders that actually contain files
+                has_files = any(item.is_file() for item in items)
+                if not has_files:
+                    # Folder only contains subdirectories, skip it
+                    # (subdirectories will be checked in their own iteration)
                     continue
 
                 # Check if folder contains any movie files
@@ -273,6 +294,12 @@ async def migrate_non_movie_folders(
         # This allows the async event loop to handle other requests while scanning
         # The scan can take a long time on large directories, so running it in a
         # separate thread prevents blocking the worker and causing timeouts
+        # Exclude migrated_path if it's inside target_path to prevent moving it into itself
+        exclude_path = (
+            migrated_path
+            if migrated_path.resolve().is_relative_to(target_path.resolve())
+            else None
+        )
         loop = asyncio.get_running_loop()
         folders_to_migrate = await loop.run_in_executor(
             _executor,
@@ -280,6 +307,7 @@ async def migrate_non_movie_folders(
             target_path,
             max_folders_to_scan,
             None,  # Use default movie extensions
+            exclude_path,  # Exclude migrated directory if inside target
         )
 
         logger.info(
@@ -318,15 +346,18 @@ async def migrate_non_movie_folders(
                 )
                 continue
 
-            folder_name = folder_path.name
-            target_migrated_path = migrated_path / folder_name
+            # Preserve relative path structure to avoid collisions when folders
+            # with the same name exist at different paths (e.g., /target/a/common
+            # and /target/b/common). Use relative path from target directory.
+            folder_relative = folder_path.relative_to(target_path)
+            target_migrated_path = migrated_path / folder_relative
 
             if not dry_run:
                 try:
                     # Check if destination already exists
                     if target_migrated_path.exists():
                         logger.info(
-                            f"Skipping folder (destination exists): {folder_name} "
+                            f"Skipping folder (destination exists): {folder_relative} "
                             f"-> {target_migrated_path}"
                         )
                         skipped_folders.append(

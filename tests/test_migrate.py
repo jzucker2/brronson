@@ -225,6 +225,85 @@ class TestNonMovieFolderMigration(unittest.TestCase):
             str(data["folders_moved"]),
         )
 
+    def test_migrate_preserves_path_structure(self):
+        """Test that folders with same name at different paths don't collide"""
+        # First, clean up existing folders from setUp
+        client.post("/api/v1/migrate/non-movie-folders?dry_run=false")
+
+        # Create two folders with the same name at different paths
+        (self.test_path / "a").mkdir()
+        (self.test_path / "a" / "common").mkdir()
+        (self.test_path / "a" / "common" / "file1.txt").touch()
+
+        (self.test_path / "b").mkdir()
+        (self.test_path / "b" / "common").mkdir()
+        (self.test_path / "b" / "common" / "file2.txt").touch()
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Both folders should be moved, preserving their path structure
+        self.assertEqual(data["folders_moved"], 2)
+        self.assertIn("a/common", data["moved_folders"])
+        self.assertIn("b/common", data["moved_folders"])
+
+        # Verify both folders exist in migrated directory with preserved paths
+        self.assertTrue((self.migrated_path / "a" / "common").exists())
+        self.assertTrue((self.migrated_path / "b" / "common").exists())
+        self.assertTrue(
+            (self.migrated_path / "a" / "common" / "file1.txt").exists()
+        )
+        self.assertTrue(
+            (self.migrated_path / "b" / "common" / "file2.txt").exists()
+        )
+
+        # Verify original folders are gone
+        self.assertFalse((self.test_path / "a" / "common").exists())
+        self.assertFalse((self.test_path / "b" / "common").exists())
+
+    def test_migrate_excludes_migrated_directory(self):
+        """Test that migrated directory is excluded from scan if inside target"""
+        # First, clean up existing folders from setUp
+        client.post("/api/v1/migrate/non-movie-folders?dry_run=false")
+
+        # Set migrated directory inside target directory
+        nested_migrated = self.test_path / "migrated"
+        nested_migrated.mkdir()
+
+        # Create a folder without movie files
+        (self.test_path / "to_migrate").mkdir()
+        (self.test_path / "to_migrate" / "file.txt").touch()
+
+        # Update environment to use nested migrated directory
+        os.environ["MIGRATED_MOVIES_DIRECTORY"] = str(nested_migrated)
+
+        try:
+            response = client.post(
+                "/api/v1/migrate/non-movie-folders?dry_run=false"
+            )
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+
+            # Should find and move the folder, but NOT the migrated directory itself
+            self.assertGreater(data["folders_moved"], 0)
+            self.assertNotIn("migrated", data["moved_folders"])
+
+            # Verify migrated directory still exists (wasn't moved into itself)
+            self.assertTrue(nested_migrated.exists())
+            # Verify the folder was moved to the migrated directory
+            self.assertTrue((nested_migrated / "to_migrate").exists())
+        finally:
+            # Restore original migrated directory
+            if self.original_migrated_dir is not None:
+                os.environ["MIGRATED_MOVIES_DIRECTORY"] = (
+                    self.original_migrated_dir
+                )
+            elif "MIGRATED_MOVIES_DIRECTORY" in os.environ:
+                del os.environ["MIGRATED_MOVIES_DIRECTORY"]
+
 
 if __name__ == "__main__":
     unittest.main()
