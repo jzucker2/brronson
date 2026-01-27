@@ -560,9 +560,111 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
 **Movie File Extensions:**
 
 The endpoint recognizes the following movie file extensions:
+
 - `.avi`, `.mkv`, `.mp4`, `.m4v`, `.mov`, `.wmv`, `.flv`, `.webm`
 - `.mpg`, `.mpeg`, `.m2v`, `.3gp`, `.ogv`, `.divx`, `.xvid`
 - `.rm`, `.rmvb`, `.vob`, `.ts`, `.mts`, `.m2ts`
+
+**How It Works:**
+
+The migrate endpoint processes folders in a specific way to ensure safe and predictable behavior:
+
+1. **Only First-Level Subdirectories**: The endpoint only scans immediate subdirectories of the target directory (first-level only). It does not process nested subdirectories separately.
+
+2. **Recursive Movie File Check**: For each first-level subdirectory, the endpoint recursively checks the entire folder tree to see if it contains any movie files anywhere within it.
+
+3. **Entire Folder Migration**: If a first-level subdirectory contains no movie files anywhere within it, the entire first-level subdirectory (including all nested content) is moved as one unit.
+
+4. **Nested Folders Not Processed Separately**: Nested subdirectories are never processed individually - they only move as part of their parent first-level folder.
+
+**Examples:**
+
+**Example 1: Simple Case**
+
+```text
+/target/
+  ├── folder_a/
+  │   └── file.txt          ← No movie files
+  └── folder_b/
+      └── movie.mp4         ← Has movie file
+```
+
+- `folder_a` → **MIGRATED** (no movies found)
+- `folder_b` → **NOT migrated** (has movie.mp4)
+
+**Example 2: Nested Structure**
+
+```text
+/target/
+  ├── folder_a/
+  │   ├── subfolder/
+  │   │   └── file.txt      ← No movie files anywhere
+  │   └── readme.txt
+  └── folder_b/
+      ├── subfolder/
+      │   └── movie.mkv    ← Has movie file
+      └── file.txt
+```
+
+- `folder_a` → **MIGRATED** (entire folder_a, including subfolder, moved)
+- `folder_b` → **NOT migrated** (has movie.mkv in subfolder)
+
+**Example 3: Movie at Same Level as Nested Folder**
+
+```text
+/target/
+  ├── folder_a/
+  │   ├── subfolder/
+  │   │   └── file.txt      ← No movie files
+  │   └── movie.mp4         ← Has movie file at first level
+  └── folder_b/
+      └── subfolder/
+          └── file.txt      ← No movie files anywhere
+```
+
+- `folder_a` → **NOT migrated** (has movie.mp4, even though subfolder has no movies)
+- `folder_b` → **MIGRATED** (entire folder_b, including subfolder, moved)
+
+**Example 4: Multiple Nested Levels**
+
+```text
+/target/
+  └── folder_a/
+      ├── level1/
+      │   └── level2/
+      │       └── level3/
+      │           └── file.txt    ← No movie files anywhere
+      └── readme.txt
+```
+
+- `folder_a` → **MIGRATED** (entire folder_a, including all nested levels, moved as one unit)
+
+**Example 5: Mixed Content**
+
+```text
+/target/
+  ├── folder_a/
+  │   ├── file1.txt
+  │   ├── file2.jpg
+  │   └── subfolder/
+  │       └── file3.txt     ← No movie files anywhere
+  └── folder_b/
+      ├── file1.txt
+      └── subfolder/
+          └── movie.avi     ← Has movie file
+```
+
+- `folder_a` → **MIGRATED** (no movies found anywhere in folder_a)
+- `folder_b` → **NOT migrated** (has movie.avi in subfolder)
+
+**Key Points:**
+
+- ✅ **Only first-level subdirectories are considered** - Nested folders like `folder_a/subfolder` are never processed separately
+- ✅ **Recursive movie file check** - If `folder_a` contains a movie anywhere (even deep in nested subdirectories), `folder_a` is NOT migrated
+- ✅ **Entire folder moves** - If `folder_a` has no movies, the whole `folder_a` (including all nested content) is moved
+- ✅ **Nested folders never move individually** - They only move as part of their parent first-level folder
+
+This design ensures that if a first-level folder has no movie files anywhere within it, the entire folder (and all its nested content) is moved as one atomic unit, preventing partial moves and maintaining folder structure integrity.
 
 ## Monitoring
 
