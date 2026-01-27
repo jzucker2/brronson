@@ -85,6 +85,7 @@ A simple self hosted application for helping with media management for the -arr 
 - `GET /api/v1/compare/directories` - Compare subdirectories between directories
 - `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories between directories
 - `POST /api/v1/salvage/subtitle-folders` - Salvage folders with subtitles from recycled movies directory
+- `POST /api/v1/migrate/non-movie-folders` - Move folders without movie files to migrated directory
 
 ### File Cleanup Endpoints
 
@@ -442,6 +443,78 @@ curl -X POST "http://localhost:1968/api/v1/salvage/subtitle-folders?dry_run=fals
 - **Error Handling**: Comprehensive error reporting for failed operations
 - **Prometheus Metrics**: Records salvage operations including skipped items for monitoring
 
+### Non-Movie Folder Migration Endpoints
+
+- `POST /api/v1/migrate/non-movie-folders` - Move folders without movie files to migrated directory
+
+#### Non-Movie Folder Migration Usage
+
+The non-movie folder migration endpoint helps move folders that contain files but no movie files (like .avi, .mkv, .mp4, etc.) from the target directory to the migrated movies directory. This is useful for organizing folders that don't contain actual movie content.
+
+**Configuration:**
+
+- `TARGET_DIRECTORY` - Directory to scan for folders without movie files (default: `/target`)
+- `MIGRATED_MOVIES_DIRECTORY` - Destination directory for folders without movie files (default: `/migrated/movies`)
+
+**Migrate folders without movie files (dry run - default):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders"
+```
+
+**Migrate folders without movie files (actual move):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false"
+```
+
+**Use batch_size for re-entrant operations:**
+
+```bash
+# Move up to 50 folders per request (skipped folders don't count)
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&batch_size=50"
+```
+
+**Response format:**
+
+```json
+{
+  "target_directory": "/path/to/target",
+  "migrated_directory": "/path/to/migrated",
+  "dry_run": true,
+  "batch_size": 100,
+  "folders_found": 5,
+  "folders_moved": 0,
+  "folders_skipped": 0,
+  "errors": 0,
+  "batch_limit_reached": false,
+  "remaining_folders": 0,
+  "folders_to_migrate": ["folder1", "folder2", "folder3"],
+  "moved_folders": [],
+  "skipped_folders": [],
+  "error_details": []
+}
+```
+
+**Features:**
+
+- **Movie File Detection**: Identifies folders that contain files but no movie files based on extension list
+- **Recursive Scanning**: Scans entire directory structure to find folders without movie files
+- **Safe by Default**: Default `dry_run=true` prevents accidental moves
+- **Batch Processing**: Default `batch_size=100` allows processing in batches for re-entrant operations
+- **Re-entrant**: Can be called multiple times to resume from where it stopped
+- **Skip Existing**: If a destination folder already exists, it is skipped (not overwritten) and logged
+- **Error Handling**: Comprehensive error reporting for failed moves
+- **Progress Tracking**: `remaining_folders` field shows how many folders still need to be processed
+- **Prometheus Metrics**: Records found, moved, skipped, and error metrics
+
+**Movie File Extensions:**
+
+The endpoint recognizes the following movie file extensions:
+- `.avi`, `.mkv`, `.mp4`, `.m4v`, `.mov`, `.wmv`, `.flv`, `.webm`
+- `.mpg`, `.mpeg`, `.m2v`, `.3gp`, `.ogv`, `.divx`, `.xvid`
+- `.rm`, `.rmvb`, `.vob`, `.ts`, `.mts`, `.m2ts`
+
 **Supported Subtitle Formats:**
 
 The default configuration supports the following subtitle file extensions:
@@ -490,6 +563,78 @@ The move operation now includes automatic cleanup by default:
 - Comprehensive error reporting for failed operations
 - Uses existing directory validation and security checks
 - Cleanup failures don't prevent move operations from continuing
+
+### Non-Movie Folder Migration Endpoints
+
+- `POST /api/v1/migrate/non-movie-folders` - Move folders without movie files to migrated directory
+
+#### Non-Movie Folder Migration Usage
+
+The non-movie folder migration endpoint helps move folders that contain files but no movie files (like .avi, .mkv, .mp4, etc.) from the target directory to the migrated movies directory. This is useful for organizing folders that don't contain actual movie content.
+
+**Configuration:**
+
+- `TARGET_DIRECTORY` - Directory to scan for folders without movie files (default: `/target`)
+- `MIGRATED_MOVIES_DIRECTORY` - Destination directory for folders without movie files (default: `/migrated/movies`)
+
+**Migrate folders without movie files (dry run - default):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders"
+```
+
+**Migrate folders without movie files (actual move):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false"
+```
+
+**Use batch_size for re-entrant operations:**
+
+```bash
+# Move up to 50 folders per request (skipped folders don't count)
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&batch_size=50"
+```
+
+**Response format:**
+
+```json
+{
+  "target_directory": "/path/to/target",
+  "migrated_directory": "/path/to/migrated",
+  "dry_run": true,
+  "batch_size": 100,
+  "folders_found": 5,
+  "folders_moved": 0,
+  "folders_skipped": 0,
+  "errors": 0,
+  "batch_limit_reached": false,
+  "remaining_folders": 0,
+  "folders_to_migrate": ["folder1", "folder2", "folder3"],
+  "moved_folders": [],
+  "skipped_folders": [],
+  "error_details": []
+}
+```
+
+**Features:**
+
+- **Movie File Detection**: Identifies folders that contain files but no movie files based on extension list
+- **Recursive Scanning**: Scans entire directory structure to find folders without movie files
+- **Safe by Default**: Default `dry_run=true` prevents accidental moves
+- **Batch Processing**: Default `batch_size=100` allows processing in batches for re-entrant operations
+- **Re-entrant**: Can be called multiple times to resume from where it stopped
+- **Skip Existing**: If a destination folder already exists, it is skipped (not overwritten) and logged
+- **Error Handling**: Comprehensive error reporting for failed moves
+- **Progress Tracking**: `remaining_folders` field shows how many folders still need to be processed
+- **Prometheus Metrics**: Records found, moved, skipped, and error metrics
+
+**Movie File Extensions:**
+
+The endpoint recognizes the following movie file extensions:
+- `.avi`, `.mkv`, `.mp4`, `.m4v`, `.mov`, `.wmv`, `.flv`, `.webm`
+- `.mpg`, `.mpeg`, `.m2v`, `.3gp`, `.ogv`, `.divx`, `.xvid`
+- `.rm`, `.rmvb`, `.vob`, `.ts`, `.mts`, `.m2ts`
 
 ## Monitoring
 
@@ -553,6 +698,15 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `brronson_empty_folders_errors_total` - Total errors during empty folder cleanup operations (labels: target_directory, error_type)
 - `brronson_empty_folders_operation_duration_seconds` - Time spent on empty folder cleanup operations (labels: operation_type, target_directory)
 - `brronson_empty_folders_batch_operations_total` - Total number of batch operations performed (labels: target_directory, batch_size, dry_run)
+
+#### Non-Movie Folder Migration Metrics
+
+- `brronson_migrate_folders_found_total` - Total number of folders without movie files found (labels: target_directory, dry_run)
+- `brronson_migrate_folders_moved_total` - Total number of folders successfully moved to migrated directory (labels: target_directory, migrated_directory, dry_run)
+- `brronson_migrate_folders_skipped_total` - Total number of folders skipped during migration (target already exists) (labels: target_directory, migrated_directory, dry_run)
+- `brronson_migrate_errors_total` - Total errors during folder migration operations (labels: target_directory, migrated_directory, error_type)
+- `brronson_migrate_operation_duration_seconds` - Time spent on folder migration operations (labels: operation_type, target_directory, migrated_directory)
+- `brronson_migrate_batch_operations_total` - Total number of batch operations performed (labels: target_directory, migrated_directory, batch_size, dry_run)
 
 ## Deployment
 

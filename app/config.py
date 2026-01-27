@@ -42,6 +42,31 @@ DEFAULT_SUBTITLE_EXTENSIONS = [
     ".txt",  # Some subtitle files use .txt extension
 ]
 
+# Default movie/video file extensions (case-insensitive)
+DEFAULT_MOVIE_EXTENSIONS = [
+    ".avi",
+    ".mkv",
+    ".mp4",
+    ".m4v",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".webm",
+    ".mpg",
+    ".mpeg",
+    ".m2v",
+    ".3gp",
+    ".ogv",
+    ".divx",
+    ".xvid",
+    ".rm",
+    ".rmvb",
+    ".vob",
+    ".ts",
+    ".mts",
+    ".m2ts",
+]
+
 
 def get_cleanup_directory():
     """Get the cleanup directory from environment variable"""
@@ -61,3 +86,8 @@ def get_recycled_movies_directory():
 def get_salvaged_movies_directory():
     """Get the salvaged movies directory from environment variable"""
     return os.getenv("SALVAGED_MOVIES_DIRECTORY", "/salvaged/movies")
+
+
+def get_migrated_movies_directory():
+    """Get the migrated movies directory from environment variable"""
+    return os.getenv("MIGRATED_MOVIES_DIRECTORY", "/migrated/movies")
