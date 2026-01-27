@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -309,6 +310,67 @@ class TestNonMovieFolderMigration(unittest.TestCase):
                 )
             elif "MIGRATED_MOVIES_DIRECTORY" in os.environ:
                 del os.environ["MIGRATED_MOVIES_DIRECTORY"]
+
+    def test_migrate_skips_symlinks_pointing_outside_target(self):
+        """Test that symlinks pointing outside target are skipped"""
+        client.post("/api/v1/migrate/non-movie-folders?dry_run=false")
+
+        # Create external dir with no movies
+        external = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: shutil.rmtree(external, ignore_errors=True))
+        (external / "file.txt").touch()
+
+        # Symlink in target pointing outside
+        (self.test_path / "ext_link").symlink_to(external)
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Should not include ext_link (symlink points outside target)
+        self.assertNotIn("ext_link", data["folders_to_migrate"])
+        self.assertNotIn("ext_link", data["moved_folders"])
+        # External directory must still exist and be unchanged
+        self.assertTrue(external.exists())
+        self.assertTrue((external / "file.txt").exists())
+
+    def test_migrate_moves_symlink_not_target(self):
+        """Test that when migrating a symlink (pointing inside target), the symlink is moved, not its target"""
+        client.post("/api/v1/migrate/non-movie-folders?dry_run=false")
+
+        # Real folder with no movies inside target
+        (self.test_path / "real_folder").mkdir()
+        (self.test_path / "real_folder" / "file.txt").touch()
+        # Symlink inside target pointing to that folder
+        (self.test_path / "link_to_real").symlink_to(
+            self.test_path / "real_folder"
+        )
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Both real_folder and link_to_real have no movies; both get migrated
+        self.assertIn("real_folder", data["moved_folders"])
+        self.assertIn("link_to_real", data["moved_folders"])
+        # real_folder content moved to migrated
+        self.assertTrue(
+            (self.migrated_path / "real_folder" / "file.txt").exists()
+        )
+        # link_to_real (the symlink) moved to migrated; use lexists because
+        # if real_folder was moved first the symlink is broken (target gone)
+        # and .exists() would be False since it follows the link
+        migrated_link = self.migrated_path / "link_to_real"
+        self.assertTrue(
+            os.path.lexists(str(migrated_link)),
+            f"Symlink should exist at {migrated_link} (lexists)",
+        )
+        self.assertFalse((self.test_path / "real_folder").exists())
+        self.assertFalse(os.path.lexists(str(self.test_path / "link_to_real")))
 
 
 if __name__ == "__main__":

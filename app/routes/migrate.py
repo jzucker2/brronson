@@ -106,6 +106,7 @@ def find_folders_without_movies(
         movie_extensions = {ext.lower() for ext in DEFAULT_MOVIE_EXTENSIONS}
 
     folders_without_movies = []
+    resolved_target = directory_path.resolve()
     resolved_exclude = exclude_path.resolve() if exclude_path else None
 
     logger.info(
@@ -136,6 +137,17 @@ def find_folders_without_movies(
 
             resolved_subdir = subdir_path.resolve()
 
+            # CRITICAL: Skip symlinks that point outside the target directory.
+            # Otherwise we would store the resolved path and later move the
+            # symlink's target (external data), not the symlink itself.
+            if subdir_path.is_symlink() and not resolved_subdir.is_relative_to(
+                resolved_target
+            ):
+                logger.info(
+                    f"Skipping symlink pointing outside target: {subdir_path.relative_to(directory_path)}"
+                )
+                continue
+
             # CRITICAL: Never include the excluded path (e.g., migrated directory)
             # if it's inside the target directory. This prevents attempting to
             # move the migrated directory into itself.
@@ -154,8 +166,10 @@ def find_folders_without_movies(
                 if not folder_contains_movie_files(
                     resolved_subdir, movie_extensions
                 ):
-                    # First-level subdirectory has no movie files - add to list
-                    folders_without_movies.append(resolved_subdir)
+                    # Append original path (subdir_path), not resolved path, so
+                    # we move the symlink or directory as it appears in the
+                    # target. Moving a symlink moves the link, not its target.
+                    folders_without_movies.append(subdir_path)
                     logger.debug(
                         f"Found folder without movies: {subdir_path.relative_to(directory_path)}"
                     )
@@ -349,8 +363,10 @@ async def migrate_non_movie_folders(
                         ).inc()
                         continue
 
-                    # Check if source still exists (might have been moved already)
-                    if not folder_path.exists():
+                    # Check if source still exists (might have been moved already).
+                    # Use lexists() so we don't skip symlinks whose target was moved
+                    # (exists() follows symlinks and returns False for broken symlinks).
+                    if not os.path.lexists(str(folder_path)):
                         logger.info(
                             f"Skipping folder (already moved): {folder_name}"
                         )
@@ -372,10 +388,11 @@ async def migrate_non_movie_folders(
                         dry_run=str(dry_run).lower(),
                     ).inc()
                 except OSError as e:
-                    # Folder might not exist anymore (moved by another process)
-                    if not folder_path.exists():
+                    # Folder might not exist anymore (moved by another process).
+                    # Use lexists() so we don't treat broken symlinks as "moved".
+                    if not os.path.lexists(str(folder_path)):
                         logger.info(
-                            f"Folder no longer exists (moved during processing): {folder_path.relative_to(target_path)}"
+                            f"Folder no longer exists (moved during processing): {folder_name}"
                         )
                         continue
                     error_msg = f"Failed to move {folder_path}: {str(e)}"
