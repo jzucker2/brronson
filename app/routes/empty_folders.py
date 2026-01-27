@@ -51,12 +51,30 @@ def find_empty_folders(
     empty_folders_set = set()  # Track which folders we've identified as empty
     resolved_target = directory_path.resolve()
 
+    logger.info(
+        f"Starting directory walk for empty folders: {directory_path} "
+        f"(max_folders={max_folders})"
+    )
+
     # Walk through directory from bottom up (deepest first)
     # This ensures we process nested empty folders correctly
+    directories_scanned = 0
     try:
         for root, dirs, files in os.walk(directory_path, topdown=False):
+            directories_scanned += 1
+            # Log progress every 1000 directories scanned
+            if directories_scanned % 1000 == 0:
+                logger.info(
+                    f"Scanning progress: {directories_scanned} directories scanned, "
+                    f"{len(empty_folders)} empty folders found so far"
+                )
+
             # Stop scanning if we've reached the maximum number of folders
             if max_folders is not None and len(empty_folders) >= max_folders:
+                logger.info(
+                    f"Reached max_folders limit ({max_folders}): stopping scan "
+                    f"after scanning {directories_scanned} directories"
+                )
                 break
 
             root_path = Path(root).resolve()
@@ -136,8 +154,16 @@ def find_empty_folders(
         raise
     except Exception as e:
         # Log unexpected errors during scanning
-        logger.error(f"Unexpected error during empty folder scan: {str(e)}")
+        logger.error(
+            f"Unexpected error during empty folder scan after scanning "
+            f"{directories_scanned} directories: {str(e)}"
+        )
         raise
+
+    logger.info(
+        f"Directory walk completed: scanned {directories_scanned} directories, "
+        f"found {len(empty_folders)} empty folders"
+    )
 
     return empty_folders
 
@@ -170,6 +196,11 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
     start_time = time.time()
     target_dir = get_target_directory()
 
+    logger.info(
+        f"Empty folder cleanup request: dry_run={dry_run}, "
+        f"batch_size={batch_size}, target_directory={target_dir}"
+    )
+
     # Validate batch_size parameter
     # batch_size of 0 means full scan (no limit), negative values are invalid
     if batch_size < 0:
@@ -180,7 +211,9 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
 
     try:
         target_path = Path(target_dir).resolve()
+        logger.info(f"Validating target directory: {target_path}")
         validate_directory(target_path, target_dir, "empty_folders")
+        logger.info(f"Target directory validation successful: {target_path}")
     except HTTPException:
         # validate_directory already recorded the error in the correct metric
         # (empty_folders_errors_total), so we just re-raise
@@ -223,6 +256,11 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
         # This indicates there may be more folders remaining
         batch_limit_hit = batch_size > 0 and len(empty_folders) >= batch_size
 
+        logger.info(
+            f"Processing {len(empty_folders)} empty folders for removal "
+            f"(dry_run={dry_run}, batch_limit_reached={batch_limit_hit})"
+        )
+
         # Process empty folders for removal (already sorted deepest first)
         # Note: If batch_size was provided, we already limited the scan,
         # so we process all found folders. If batch_size was 0 or not provided,
@@ -242,6 +280,9 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
                     # Check if folder still exists (might have been deleted as part of parent)
                     if not folder_path.exists():
                         # Folder was already deleted (likely as part of parent removal)
+                        logger.info(
+                            f"Skipping folder (already deleted): {folder_path.relative_to(target_path)}"
+                        )
                         continue
 
                     logger.info(
@@ -261,6 +302,9 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
                 except OSError as e:
                     # Folder might not exist anymore (deleted as part of parent)
                     if not folder_path.exists():
+                        logger.info(
+                            f"Folder no longer exists (deleted during processing): {folder_path.relative_to(target_path)}"
+                        )
                         continue
                     error_msg = f"Failed to remove {folder_path}: {str(e)}"
                     logger.error(error_msg)
@@ -306,6 +350,12 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
             operation_type="cleanup_empty_folders", target_directory=target_dir
         ).observe(operation_duration)
 
+        logger.info(
+            f"Empty folder cleanup completed: found={len(empty_folders)}, "
+            f"removed={len(removed_folders)}, errors={len(errors)}, "
+            f"duration={operation_duration:.2f}s, batch_limit_reached={batch_limit_hit}"
+        )
+
         return {
             "directory": str(target_path),
             "dry_run": dry_run,
@@ -327,6 +377,11 @@ async def cleanup_empty_folders(dry_run: bool = True, batch_size: int = 100):
         }
 
     except Exception as e:
+        operation_duration = time.time() - start_time
+        logger.error(
+            f"Error during empty folder cleanup after {operation_duration:.2f}s: {str(e)}",
+            exc_info=True,
+        )
         empty_folders_errors_total.labels(
             target_directory=target_dir, error_type="operation_error"
         ).inc()
