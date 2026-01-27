@@ -381,6 +381,10 @@ async def migrate_non_movie_folders(
                         f"Starting to move folder: {folder_path.relative_to(target_path)} "
                         f"-> {target_migrated_path}"
                     )
+                    # Create parent directories if they don't exist (needed for nested paths)
+                    target_migrated_path.parent.mkdir(
+                        parents=True, exist_ok=True
+                    )
                     # Use shutil.move for cross-device moves if needed
                     shutil.move(str(folder_path), str(target_migrated_path))
                     moved_folders.append(
