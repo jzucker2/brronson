@@ -573,7 +573,7 @@ The `gunicorn.conf.py` file includes optimized settings that can be configured v
 - **Workers**: `GUNICORN_WORKERS` - Number of worker processes (default: `cpu_count * 2 + 1`)
 - **Log Level**: `GUNICORN_LOG_LEVEL` - Logging level (default: `info`)
 - **Worker Class**: Uses `uvicorn.workers.UvicornWorker` for ASGI support
-- **Timeouts**: 120-second request timeout with 30-second graceful shutdown
+- **Timeouts**: Configurable request timeout (default: `600` seconds / 10 minutes) with 30-second graceful shutdown. Can be set via `GUNICORN_TIMEOUT` environment variable. Longer timeout allows for operations like empty folder cleanup on large directory trees.
 - **Logging**: Structured access and error logging
 - **Security**: Request size limits and field restrictions
 - **Performance**: Shared memory for temporary files
