@@ -23,6 +23,7 @@ from .metrics import (
     scan_errors_total,
     salvage_errors_total,
     subdirectories_found_total,
+    sync_subtitles_errors_total,
 )
 
 
@@ -30,6 +31,8 @@ def validate_directory(
     directory_path: Path,
     cleanup_dir: str,
     operation_type: str = "scan",
+    subtitle_sync_source_directory: str = None,
+    subtitle_sync_target_directory: str = None,
 ) -> None:
     """
     Shared helper method to validate directory for cleanup/scan operations.
@@ -37,7 +40,9 @@ def validate_directory(
     Args:
         directory_path: Path to the directory to validate
         cleanup_dir: String representation of the cleanup directory for error messages  # noqa: E501
-        operation_type: Type of operation ("scan", "cleanup", "comparison", "salvage", "empty_folders", or "migrate") for metrics
+        operation_type: Type of operation ("scan", "cleanup", "comparison", "salvage", "empty_folders", "migrate", or "subtitle_sync") for metrics  # noqa: E501
+        subtitle_sync_source_directory: For operation_type "subtitle_sync", source dir for metrics  # noqa: E501
+        subtitle_sync_target_directory: For operation_type "subtitle_sync", target dir for metrics  # noqa: E501
 
     Raises:
         HTTPException: If directory validation fails
@@ -129,6 +134,14 @@ def validate_directory(
                     salvaged_directory=salvaged_dir,
                     error_type="directory_not_found",
                 ).inc()
+        elif operation_type == "subtitle_sync":
+            source_dir = subtitle_sync_source_directory or cleanup_dir
+            target_dir = subtitle_sync_target_directory or cleanup_dir
+            sync_subtitles_errors_total.labels(
+                source_directory=source_dir,
+                target_directory=target_dir,
+                error_type="directory_not_found",
+            ).inc()
         raise HTTPException(
             status_code=404,
             detail=f"Configured directory {cleanup_dir} not found",
@@ -181,6 +194,14 @@ def validate_directory(
                     migrate_errors_total.labels(
                         target_directory=target_dir,
                         migrated_directory=migrated_dir,
+                        error_type="protected_system_location",
+                    ).inc()
+                elif operation_type == "subtitle_sync":
+                    source_dir = subtitle_sync_source_directory or cleanup_dir
+                    target_dir = subtitle_sync_target_directory or cleanup_dir
+                    sync_subtitles_errors_total.labels(
+                        source_directory=source_dir,
+                        target_directory=target_dir,
                         error_type="protected_system_location",
                     ).inc()
                 raise HTTPException(

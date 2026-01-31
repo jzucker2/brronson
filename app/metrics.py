@@ -262,4 +262,35 @@ migrate_batch_operations_total = Counter(
     ["target_directory", "migrated_directory", "batch_size", "dry_run"],
 )
 
+# Custom Prometheus metrics for subtitle sync (source -> target) operations
+sync_subtitles_files_moved_total = Counter(
+    "brronson_sync_subtitles_files_moved_total",
+    "Total number of subtitle files moved to target during sync",
+    ["source_directory", "target_directory", "dry_run"],
+)
+
+sync_subtitles_files_skipped_total = Counter(
+    "brronson_sync_subtitles_files_skipped_total",
+    "Total number of subtitle files skipped during sync (target already exists)",
+    ["source_directory", "target_directory", "dry_run"],
+)
+
+sync_subtitles_errors_total = Counter(
+    "brronson_sync_subtitles_errors_total",
+    "Total number of errors during subtitle sync operations",
+    ["source_directory", "target_directory", "error_type"],
+)
+
+sync_subtitles_operation_duration = Histogram(
+    "brronson_sync_subtitles_operation_duration_seconds",
+    "Time spent on subtitle sync operations",
+    ["operation_type", "source_directory", "target_directory"],
+)
+
+sync_subtitles_batch_operations_total = Counter(
+    "brronson_sync_subtitles_batch_operations_total",
+    "Total number of batch operations performed",
+    ["source_directory", "target_directory", "batch_size", "dry_run"],
+)
+
 brronson_info = Gauge("brronson_info", "Info about the server", ["version"])
