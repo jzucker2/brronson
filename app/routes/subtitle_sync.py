@@ -204,6 +204,11 @@ async def sync_subtitles_to_target(
 
                 if dry_run:
                     files_moved += 1
+                    sync_subtitles_files_moved_total.labels(
+                        source_directory=source_dir,
+                        target_directory=target_dir,
+                        dry_run=str(dry_run).lower(),
+                    ).inc()
                     logger.info(
                         f"DRY RUN: Would move {src_file} -> {dest_file}"
                     )
