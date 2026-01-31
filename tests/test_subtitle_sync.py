@@ -291,6 +291,68 @@ class TestSubtitleSync(unittest.TestCase):
         data2 = response2.json()
         self.assertEqual(data2["subtitle_files_moved"], 2)
 
+    def test_sync_collects_files_in_deterministic_order(self):
+        """Files are processed in sorted path order for re-entrant batch_size."""
+        movie = self.salvaged_dir / "Movie1"
+        movie.mkdir()
+        (movie / "root.srt").write_text("root")
+        (movie / "Subs").mkdir()
+        (movie / "Subs" / "a.srt").write_text("a")
+        (movie / "Subs" / "z.srt").write_text("z")
+        # Path sort order: .../Subs/a.srt, .../Subs/z.srt, .../root.srt
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+            "&batch_size=2"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["subtitle_files_moved"], 2)
+        self.assertTrue(data["batch_limit_reached"])
+        # First two by path order: Subs/a.srt, Subs/z.srt
+        self.assertFalse((movie / "Subs" / "a.srt").exists())
+        self.assertFalse((movie / "Subs" / "z.srt").exists())
+        self.assertTrue((movie / "root.srt").exists())
+        self.assertEqual(
+            (self.target_dir / "Movie1" / "Subs" / "a.srt").read_text(), "a"
+        )
+        self.assertEqual(
+            (self.target_dir / "Movie1" / "Subs" / "z.srt").read_text(), "z"
+        )
+        response2 = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+            "&batch_size=10"
+        )
+        self.assertEqual(response2.status_code, 200)
+        self.assertEqual(response2.json()["subtitle_files_moved"], 1)
+        self.assertEqual(
+            (self.target_dir / "Movie1" / "root.srt").read_text(), "root"
+        )
+
+    def test_sync_creates_target_directory_when_missing(self):
+        """Target directory is created when it does not exist (salvage pattern)."""
+        target_missing = Path(self.test_dir) / "target_missing"
+        self.assertFalse(target_missing.exists())
+        os.environ["TARGET_DIRECTORY"] = str(target_missing)
+        from importlib import reload
+        import app.main
+
+        reload(app.main)
+        global client
+        client = TestClient(app.main.app)
+
+        movie = self.salvaged_dir / "Movie1"
+        movie.mkdir()
+        (movie / "sub.srt").write_text("sub")
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(target_missing.is_dir())
+        self.assertEqual(
+            (target_missing / "Movie1" / "sub.srt").read_text(), "sub"
+        )
+
     def test_sync_subtitles_batch_size_validation(self):
         """batch_size must be positive."""
         response = client.post(

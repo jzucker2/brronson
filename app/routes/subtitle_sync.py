@@ -35,25 +35,26 @@ def _collect_subtitle_files(
     subtitle_extensions: List[str],
 ) -> List[Path]:
     """
-    Collect all subtitle files under a movie folder (recursive), sorted.
+    Collect all subtitle files under a movie folder (recursive), sorted by path.
 
     Args:
         movie_folder: Path to the movie folder (first-level under source).
         subtitle_extensions: List of subtitle file extensions (with leading dot).
 
     Returns:
-        List of Path objects for subtitle files, sorted for deterministic order.
+        List of Path objects for subtitle files, sorted by path for deterministic
+        order (re-entrant batch_size behavior).
     """
     files = []
     try:
         for root, _dirs, filenames in os.walk(movie_folder):
-            for name in sorted(filenames):
+            for name in filenames:
                 p = Path(root) / name
                 if is_subtitle_file(p, subtitle_extensions):
                     files.append(p)
     except (OSError, PermissionError):
         pass
-    return files
+    return sorted(files, key=lambda p: str(p))
 
 
 @router.post("/api/v1/sync/subtitles-to-target")
@@ -112,15 +113,8 @@ async def sync_subtitles_to_target(
             subtitle_sync_source_directory=source_dir,
             subtitle_sync_target_directory=target_dir,
         )
-        validate_directory(
-            target_path,
-            target_dir,
-            operation_type="subtitle_sync",
-            subtitle_sync_source_directory=source_dir,
-            subtitle_sync_target_directory=target_dir,
-        )
 
-        # Ensure target exists (create if needed)
+        # Ensure target exists (create if needed), then validate
         try:
             target_path.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError):
