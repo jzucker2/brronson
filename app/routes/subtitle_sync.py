@@ -179,6 +179,8 @@ async def sync_subtitles_to_target(
 
         files_moved = 0
         files_skipped = 0
+        moved_files = []
+        skipped_files = []
         errors = []
         batch_limit_hit = False
 
@@ -203,9 +205,11 @@ async def sync_subtitles_to_target(
                 except ValueError:
                     continue
                 dest_file = target_movie_base / rel
+                rel_str = str(rel_base / rel)
 
                 if dest_file.exists():
                     files_skipped += 1
+                    skipped_files.append(rel_str)
                     sync_subtitles_files_skipped_total.labels(
                         source_directory=source_dir,
                         target_directory=target_dir,
@@ -218,6 +222,7 @@ async def sync_subtitles_to_target(
 
                 if dry_run:
                     files_moved += 1
+                    moved_files.append(rel_str)
                     sync_subtitles_files_moved_total.labels(
                         source_directory=source_dir,
                         target_directory=target_dir,
@@ -232,6 +237,7 @@ async def sync_subtitles_to_target(
                     dest_file.parent.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(src_file), str(dest_file))
                     files_moved += 1
+                    moved_files.append(rel_str)
                     sync_subtitles_files_moved_total.labels(
                         source_directory=source_dir,
                         target_directory=target_dir,
@@ -271,6 +277,8 @@ async def sync_subtitles_to_target(
             "subtitle_extensions": subtitle_extensions,
             "subtitle_files_moved": files_moved,
             "subtitle_files_skipped": files_skipped,
+            "moved_files": moved_files,
+            "skipped_files": skipped_files,
             "batch_limit_reached": batch_limit_hit,
             "errors": len(errors),
             "error_details": errors,

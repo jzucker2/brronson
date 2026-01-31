@@ -710,6 +710,8 @@ curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salva
   "subtitle_extensions": [".srt", ".sub", ".vtt", ...],
   "subtitle_files_moved": 0,
   "subtitle_files_skipped": 0,
+  "moved_files": [],
+  "skipped_files": [],
   "batch_limit_reached": false,
   "errors": 0,
   "error_details": []
