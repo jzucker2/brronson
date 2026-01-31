@@ -381,3 +381,36 @@ class TestSubtitleSync(unittest.TestCase):
             "/api/v1/sync/subtitles-to-target?source=salvaged"
         )
         self.assertEqual(response.status_code, 404)
+
+    def test_sync_skips_target_when_target_inside_source(self):
+        """Target directory inside source is not processed as a movie folder."""
+        target_inside = Path(self.test_dir) / "salvaged" / "target"
+        target_inside.mkdir(parents=True)
+        os.environ["TARGET_DIRECTORY"] = str(target_inside)
+        from importlib import reload
+        import app.main
+
+        reload(app.main)
+        global client
+        client = TestClient(app.main.app)
+
+        (self.salvaged_dir / "Movie1").mkdir()
+        (self.salvaged_dir / "Movie1" / "sub.srt").write_text("sub")
+        # target is first-level under salvaged; should be skipped, not processed
+        (target_inside / "existing.srt").write_text("existing")
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["subtitle_files_moved"], 1)
+        # Movie1's sub.srt moved to target/Movie1/sub.srt
+        self.assertEqual(
+            (target_inside / "Movie1" / "sub.srt").read_text(), "sub"
+        )
+        # Target folder was skipped; no target/target/... nesting
+        self.assertEqual(
+            (target_inside / "existing.srt").read_text(), "existing"
+        )
+        self.assertFalse((target_inside / "target").exists())

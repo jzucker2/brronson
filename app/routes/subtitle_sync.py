@@ -132,11 +132,25 @@ async def sync_subtitles_to_target(
         )
 
         # First-level subdirs (movie folders) in source
+        # Exclude target if it's inside source to prevent moving into target/.../target
+        resolved_target = target_path.resolve()
         movie_folders = []
         try:
             for item in source_path.iterdir():
-                if item.is_dir():
-                    movie_folders.append(item)
+                if not item.is_dir():
+                    continue
+                resolved_item = item.resolve()
+                if resolved_item == resolved_target:
+                    logger.info(
+                        f"Skipping target directory (inside source): {item.name}"
+                    )
+                    continue
+                if resolved_target.is_relative_to(resolved_item):
+                    logger.info(
+                        f"Skipping folder containing target: {item.name}"
+                    )
+                    continue
+                movie_folders.append(item)
         except OSError as e:
             if e.errno == errno.ESTALE:
                 sync_subtitles_errors_total.labels(
