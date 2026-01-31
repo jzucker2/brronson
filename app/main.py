@@ -17,6 +17,7 @@ from .routes import (
     migrate,
     move,
     salvage,
+    subtitle_sync,
 )
 from .version import version
 
@@ -66,6 +67,7 @@ app.include_router(move.router)
 app.include_router(salvage.router)
 app.include_router(empty_folders.router)
 app.include_router(migrate.router)
+app.include_router(subtitle_sync.router)
 
 if __name__ == "__main__":
     import uvicorn

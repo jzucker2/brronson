@@ -86,6 +86,7 @@ A simple self hosted application for helping with media management for the -arr 
 - `POST /api/v1/move/non-duplicates` - Move non-duplicate subdirectories between directories
 - `POST /api/v1/salvage/subtitle-folders` - Salvage folders with subtitles from recycled movies directory
 - `POST /api/v1/migrate/non-movie-folders` - Move folders without movie files to migrated directory
+- `POST /api/v1/sync/subtitles-to-target` - Move subtitle files from salvaged or migrated directory to target
 
 ### File Cleanup Endpoints
 
@@ -667,6 +668,65 @@ The migrate endpoint processes folders in a specific way to ensure safe and pred
 
 This design ensures that if a first-level folder has no movie files anywhere within it, the entire folder (and all its nested content) is moved as one atomic unit, preventing partial moves and maintaining folder structure integrity.
 
+#### Sync Subtitles to Target Usage
+
+The sync subtitles endpoint moves subtitle files from either the salvaged or migrated movies directory into the target directory. For each movie folder in the source, subtitles are placed at the equivalent path under target (e.g. `source/Movie/Subs/en.srt` → `target/Movie/Subs/en.srt`); hierarchy is preserved. Files are only moved when the destination does not already exist. Skipped items do not count toward `batch_size`, making the operation re-entrant.
+
+**Configuration:**
+
+- `source` (query, required): `salvaged` or `migrated` – which directory to use as the source of subtitles
+- `SALVAGED_MOVIES_DIRECTORY` – Used when `source=salvaged` (default: `/salvaged/movies`)
+- `MIGRATED_MOVIES_DIRECTORY` – Used when `source=migrated` (default: `/migrated/movies`)
+- `TARGET_DIRECTORY` – Destination for subtitle files (default: `/target`)
+
+**Sync from salvaged (dry run - default):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salvaged"
+```
+
+**Sync from migrated (actual move):**
+
+```bash
+curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=migrated&dry_run=false"
+```
+
+**Use batch_size for re-entrant operations:**
+
+```bash
+# Move up to 50 subtitle files per request (skipped files don't count)
+curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false&batch_size=50"
+```
+
+**Response format:**
+
+```json
+{
+  "source": "salvaged",
+  "source_directory": "/path/to/salvaged/movies",
+  "target_directory": "/path/to/target",
+  "dry_run": true,
+  "batch_size": 100,
+  "subtitle_extensions": [".srt", ".sub", ".vtt", ...],
+  "subtitle_files_moved": 0,
+  "subtitle_files_skipped": 0,
+  "moved_files": [],
+  "skipped_files": [],
+  "batch_limit_reached": false,
+  "errors": 0,
+  "error_details": []
+}
+```
+
+**Features:**
+
+- **Source choice**: Query param `source=salvaged` or `source=migrated` selects the subtitle source
+- **Equivalent path**: Preserves hierarchy; each file goes to the same relative path under target (e.g. root stays root, Subs/en.srt stays Subs/en.srt)
+- **Skip existing**: Does not overwrite; if a file (or path) already exists in target, it is skipped and not counted toward `batch_size`
+- **Batch processing**: `batch_size` limits how many files are moved per request (default: 100); only actually moved files count
+- **Re-entrant**: Safe to call repeatedly; skipped files do not count toward the limit
+- **Dry run**: Default `dry_run=true` only reports what would be moved
+
 ## Monitoring
 
 ### Health Check
@@ -738,6 +798,14 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `brronson_migrate_errors_total` - Total errors during folder migration operations (labels: target_directory, migrated_directory, error_type)
 - `brronson_migrate_operation_duration_seconds` - Time spent on folder migration operations (labels: operation_type, target_directory, migrated_directory)
 - `brronson_migrate_batch_operations_total` - Total number of batch operations performed (labels: target_directory, migrated_directory, batch_size, dry_run)
+
+#### Subtitle Sync Metrics
+
+- `brronson_sync_subtitles_files_moved_total` - Total subtitle files moved to target (labels: source_directory, target_directory, dry_run)
+- `brronson_sync_subtitles_files_skipped_total` - Total subtitle files skipped (target already exists) (labels: source_directory, target_directory, dry_run)
+- `brronson_sync_subtitles_errors_total` - Total errors during subtitle sync (labels: source_directory, target_directory, error_type)
+- `brronson_sync_subtitles_operation_duration_seconds` - Time spent on subtitle sync (labels: operation_type, source_directory, target_directory)
+- `brronson_sync_subtitles_batch_operations_total` - Total batch operations (labels: source_directory, target_directory, batch_size, dry_run)
 
 ## Deployment
 
