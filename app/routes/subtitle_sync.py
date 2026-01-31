@@ -29,8 +29,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-SUBS_FOLDER_NAME = "Subs"
-
 
 def _collect_subtitle_files(
     movie_folder: Path,
@@ -66,13 +64,13 @@ async def sync_subtitles_to_target(
     subtitle_extensions: Optional[List[str]] = None,
 ):
     """
-    Move subtitle files and folders from source (salvaged or migrated) to target.
+    Move subtitle files from source (salvaged or migrated) to target.
 
     Scans the chosen source movies directory and moves subtitle files into the
-    target directory under each movie folder in a Subs folder, maintaining
-    structure. Only moves when the destination file does not already exist.
-    Creates the Subs folder (and any subfolders) as needed. Skipped files do
-    not count toward batch_size, making the operation re-entrant.
+    target directory under each movie folder, preserving the same hierarchy
+    (equivalent path: source/Movie/Subs/en.srt -> target/Movie/Subs/en.srt).
+    Only moves when the destination file does not already exist. Creates
+    directories as needed. Skipped files do not count toward batch_size.
 
     Args:
         source: Source of subtitles: "salvaged" or "migrated".
@@ -185,7 +183,7 @@ async def sync_subtitles_to_target(
                 movie_folder, subtitle_extensions
             )
             rel_base = movie_folder.name
-            target_subs_base = target_path / rel_base / SUBS_FOLDER_NAME
+            target_movie_base = target_path / rel_base
 
             for src_file in subtitle_files:
                 if files_moved >= batch_size:
@@ -196,7 +194,7 @@ async def sync_subtitles_to_target(
                     rel = src_file.relative_to(movie_folder)
                 except ValueError:
                     continue
-                dest_file = target_subs_base / rel
+                dest_file = target_movie_base / rel
 
                 if dest_file.exists():
                     files_skipped += 1
