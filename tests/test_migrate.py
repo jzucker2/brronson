@@ -270,6 +270,32 @@ class TestNonMovieFolderMigration(unittest.TestCase):
         self.assertGreater(data["folders_skipped"], 0)
         self.assertTrue((self.test_path / "no_delete").exists())
 
+    def test_delete_source_if_match_symlink_removes_symlink(self):
+        """When source is a symlink with exact match, unlink removes it (not rmtree)."""
+        real_dir = self.test_path / "z_real_subs"
+        real_dir.mkdir()
+        (real_dir / "en.srt").write_text("x")
+
+        symlink_path = self.test_path / "a_sym_subs"
+        symlink_path.symlink_to(real_dir)
+
+        (self.migrated_path / "a_sym_subs").mkdir()
+        (self.migrated_path / "a_sym_subs" / "en.srt").write_text("x")
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&delete_source_if_match=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_deleted"], 1)
+        self.assertIn("a_sym_subs", data["deleted_folders"])
+        self.assertFalse(symlink_path.exists())
+        # Real dir was moved to migrated (not deleted); symlink was unlinked only
+        self.assertTrue(
+            (self.migrated_path / "z_real_subs" / "en.srt").exists()
+        )
+
     def test_migrate_non_movie_folders_nested(self):
         """Test that first-level folders with nested subdirectories are migrated"""
         response = client.post(

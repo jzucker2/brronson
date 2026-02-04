@@ -413,6 +413,9 @@ async def migrate_non_movie_folders(
             f"Folder scan completed: Found {len(folders_to_migrate)} folders "
             f"without movie files in {target_path}"
         )
+        # Process symlinks before their targets so delete_source_if_match
+        # can unlink symlinks before the target dir is moved
+        folders_to_migrate.sort(key=lambda p: (not p.is_symlink(), p.name))
         if folders_to_migrate:
             logger.info(
                 f"Folders to migrate: {', '.join([f.name for f in folders_to_migrate[:10]])}{'...' if len(folders_to_migrate) > 10 else ''}"
@@ -468,13 +471,29 @@ async def migrate_non_movie_folders(
                                 f"Deleting source (exact match in migrated): "
                                 f"{folder_name}"
                             )
-                            shutil.rmtree(str(folder_path))
-                            deleted_folders.append(folder_name)
-                            migrate_folders_deleted_total.labels(
-                                target_directory=target_dir,
-                                migrated_directory=migrated_dir,
-                                dry_run=str(dry_run).lower(),
-                            ).inc()
+                            try:
+                                if folder_path.is_symlink():
+                                    folder_path.unlink()
+                                else:
+                                    shutil.rmtree(str(folder_path))
+                                deleted_folders.append(folder_name)
+                                migrate_folders_deleted_total.labels(
+                                    target_directory=target_dir,
+                                    migrated_directory=migrated_dir,
+                                    dry_run=str(dry_run).lower(),
+                                ).inc()
+                            except OSError as e:
+                                error_msg = (
+                                    f"Failed to delete source: {folder_path}: "
+                                    f"{str(e)}"
+                                )
+                                logger.error(error_msg)
+                                errors.append(error_msg)
+                                migrate_errors_total.labels(
+                                    target_directory=target_dir,
+                                    migrated_directory=migrated_dir,
+                                    error_type="folder_delete_error",
+                                ).inc()
                         else:
                             logger.info(
                                 f"Skipping folder (destination exists): "
