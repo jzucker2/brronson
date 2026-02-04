@@ -244,6 +244,12 @@ migrate_folders_skipped_total = Counter(
     ["target_directory", "migrated_directory", "dry_run"],
 )
 
+migrate_folders_deleted_total = Counter(
+    "brronson_migrate_folders_deleted_total",
+    "Total number of source folders deleted when exact match exists in migrated",
+    ["target_directory", "migrated_directory", "dry_run"],
+)
+
 migrate_errors_total = Counter(
     "brronson_migrate_errors_total",
     "Total errors during folder migration operations",

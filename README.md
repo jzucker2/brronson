@@ -525,6 +525,13 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
 curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&batch_size=50"
 ```
 
+**Delete source when exact match exists (subtitle-only folders):**
+
+```bash
+# When destination exists with identical contents (only subtitles, same structure/sizes), delete source
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&delete_source_if_match=true"
+```
+
 **Response format:**
 
 ```json
@@ -533,15 +540,18 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
   "migrated_directory": "/path/to/migrated",
   "dry_run": true,
   "batch_size": 100,
+  "delete_source_if_match": false,
   "folders_found": 5,
   "folders_moved": 0,
   "folders_skipped": 0,
+  "folders_deleted": 0,
   "errors": 0,
   "batch_limit_reached": false,
   "remaining_folders": 0,
   "folders_to_migrate": ["folder1", "folder2", "folder3"],
   "moved_folders": [],
   "skipped_folders": [],
+  "deleted_folders": [],
   "error_details": []
 }
 ```
@@ -555,6 +565,7 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
 - **Batch Processing**: Default `batch_size=100` allows processing in batches for re-entrant operations
 - **Re-entrant**: Can be called multiple times to resume from where it stopped
 - **Skip Existing**: If a destination folder already exists, it is skipped (not overwritten) and logged
+- **Delete Source If Match**: When `delete_source_if_match=true` and destination exists with exact contents (folder contains only subtitles, same structure and file sizes), the source folder is deleted instead of skipped
 - **Error Handling**: Comprehensive error reporting for failed moves
 - **Progress Tracking**: `remaining_folders` field shows how many folders still need to be processed
 - **Prometheus Metrics**: Records found, moved, skipped, and error metrics
@@ -795,6 +806,7 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `brronson_migrate_folders_found_total` - Total number of folders without movie files found (labels: target_directory, dry_run)
 - `brronson_migrate_folders_moved_total` - Total number of folders successfully moved to migrated directory (labels: target_directory, migrated_directory, dry_run)
 - `brronson_migrate_folders_skipped_total` - Total number of folders skipped during migration (target already exists) (labels: target_directory, migrated_directory, dry_run)
+- `brronson_migrate_folders_deleted_total` - Total number of source folders deleted when exact match exists in migrated (labels: target_directory, migrated_directory, dry_run)
 - `brronson_migrate_errors_total` - Total errors during folder migration operations (labels: target_directory, migrated_directory, error_type)
 - `brronson_migrate_operation_duration_seconds` - Time spent on folder migration operations (labels: operation_type, target_directory, migrated_directory)
 - `brronson_migrate_batch_operations_total` - Total number of batch operations performed (labels: target_directory, migrated_directory, batch_size, dry_run)

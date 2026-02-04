@@ -13,13 +13,15 @@ from fastapi import APIRouter, HTTPException
 
 from ..config import (
     DEFAULT_MOVIE_EXTENSIONS,
+    DEFAULT_SUBTITLE_EXTENSIONS,
     get_migrated_movies_directory,
     get_target_directory,
 )
-from ..helpers import validate_directory
+from ..helpers import is_subtitle_file, validate_directory
 from ..metrics import (
     migrate_batch_operations_total,
     migrate_errors_total,
+    migrate_folders_deleted_total,
     migrate_folders_found_total,
     migrate_folders_moved_total,
     migrate_folders_skipped_total,
@@ -92,6 +94,64 @@ def folder_contains_movie_files(
         # to be safe (don't migrate folders we can't read)
         return True
     return False
+
+
+def _folder_contains_only_subtitles(
+    folder_path: Path, subtitle_extensions: List[str]
+) -> bool:
+    """
+    Check if a folder contains only subtitle files (recursively).
+
+    Args:
+        folder_path: Path to the folder to check
+        subtitle_extensions: List of subtitle file extensions (with leading dot)
+
+    Returns:
+        True if all files in the folder are subtitle files, False otherwise
+    """
+    try:
+        for root, _dirs, files in os.walk(folder_path):
+            for name in files:
+                p = Path(root) / name
+                if not is_subtitle_file(p, subtitle_extensions):
+                    return False
+    except (OSError, PermissionError):
+        return False
+    return True
+
+
+def _contents_match(source_dir: Path, dest_dir: Path) -> bool:
+    """
+    Check if two directories have identical contents (same structure, file sizes).
+
+    Args:
+        source_dir: Source directory path
+        dest_dir: Destination directory path
+
+    Returns:
+        True if same relative paths and file sizes, False otherwise
+    """
+    try:
+        source_files = {}
+        for root, _dirs, files in os.walk(source_dir):
+            for name in files:
+                p = Path(root) / name
+                rel = p.relative_to(source_dir)
+                source_files[str(rel)] = p.stat().st_size
+        dest_files = {}
+        for root, _dirs, files in os.walk(dest_dir):
+            for name in files:
+                p = Path(root) / name
+                rel = p.relative_to(dest_dir)
+                dest_files[str(rel)] = p.stat().st_size
+        if set(source_files.keys()) != set(dest_files.keys()):
+            return False
+        for rel, size in source_files.items():
+            if dest_files.get(rel) != size:
+                return False
+        return True
+    except (ValueError, OSError):
+        return False
 
 
 def find_folders_without_movies(
@@ -232,7 +292,9 @@ def find_folders_without_movies(
 
 @router.post("/api/v1/migrate/non-movie-folders")
 async def migrate_non_movie_folders(
-    dry_run: bool = True, batch_size: int = 100
+    dry_run: bool = True,
+    batch_size: int = 100,
+    delete_source_if_match: bool = False,
 ):
     """
     Find and move folders that contain files but no movie files to migrated directory.
@@ -244,6 +306,8 @@ async def migrate_non_movie_folders(
       cleanup endpoint for those).
     - Moves those folders to the migrated movies directory
     - Supports batch processing for re-entrant operations
+    - When delete_source_if_match=True and destination exists with exact contents
+      (only subtitle files, same structure and sizes), deletes the source folder
 
     Args:
         dry_run: If True, only show what would be moved (default: True)
@@ -254,9 +318,14 @@ async def migrate_non_movie_folders(
                    not skipped folders. This makes the operation re-entrant -
                    subsequent requests will continue from where the previous request
                    stopped.
+        delete_source_if_match: If True, when destination already exists and source
+                               contains only subtitles with exact match (same
+                               structure and file sizes), delete the source folder
+                               instead of skipping (default: False)
 
     Returns:
-        dict: Migration results including folders found, moved, skipped, and errors
+        dict: Migration results including folders found, moved, skipped, deleted,
+              and errors
     """
     start_time = time.time()
     target_dir = get_target_directory()
@@ -351,6 +420,7 @@ async def migrate_non_movie_folders(
 
         moved_folders = []
         skipped_folders = []
+        deleted_folders = []
         errors = []
         # batch_limit_reached is True if:
         # - batch_size > 0 (a limit was set)
@@ -385,16 +455,37 @@ async def migrate_non_movie_folders(
                 try:
                     # Check if destination already exists
                     if target_migrated_path.exists():
-                        logger.info(
-                            f"Skipping folder (destination exists): {folder_name} "
-                            f"-> {target_migrated_path}"
-                        )
-                        skipped_folders.append(folder_name)
-                        migrate_folders_skipped_total.labels(
-                            target_directory=target_dir,
-                            migrated_directory=migrated_dir,
-                            dry_run=str(dry_run).lower(),
-                        ).inc()
+                        if (
+                            delete_source_if_match
+                            and _folder_contains_only_subtitles(
+                                folder_path, DEFAULT_SUBTITLE_EXTENSIONS
+                            )
+                            and _contents_match(
+                                folder_path, target_migrated_path
+                            )
+                        ):
+                            logger.info(
+                                f"Deleting source (exact match in migrated): "
+                                f"{folder_name}"
+                            )
+                            shutil.rmtree(str(folder_path))
+                            deleted_folders.append(folder_name)
+                            migrate_folders_deleted_total.labels(
+                                target_directory=target_dir,
+                                migrated_directory=migrated_dir,
+                                dry_run=str(dry_run).lower(),
+                            ).inc()
+                        else:
+                            logger.info(
+                                f"Skipping folder (destination exists): "
+                                f"{folder_name} -> {target_migrated_path}"
+                            )
+                            skipped_folders.append(folder_name)
+                            migrate_folders_skipped_total.labels(
+                                target_directory=target_dir,
+                                migrated_directory=migrated_dir,
+                                dry_run=str(dry_run).lower(),
+                            ).inc()
                         continue
 
                     # Check if source still exists (might have been moved already).
@@ -453,10 +544,40 @@ async def migrate_non_movie_folders(
                     # moves count. This ensures re-entrancy: persistent errors
                     # won't block progress on other folders.
             else:
-                logger.info(
-                    f"DRY RUN: Would move folder: {folder_name} "
-                    f"-> {target_migrated_path}"
-                )
+                if target_migrated_path.exists():
+                    if (
+                        delete_source_if_match
+                        and _folder_contains_only_subtitles(
+                            folder_path, DEFAULT_SUBTITLE_EXTENSIONS
+                        )
+                        and _contents_match(folder_path, target_migrated_path)
+                    ):
+                        logger.info(
+                            f"DRY RUN: Would delete source (exact match): "
+                            f"{folder_name}"
+                        )
+                        deleted_folders.append(folder_name)
+                        migrate_folders_deleted_total.labels(
+                            target_directory=target_dir,
+                            migrated_directory=migrated_dir,
+                            dry_run=str(dry_run).lower(),
+                        ).inc()
+                    else:
+                        logger.info(
+                            f"DRY RUN: Would skip (destination exists): "
+                            f"{folder_name}"
+                        )
+                        skipped_folders.append(folder_name)
+                        migrate_folders_skipped_total.labels(
+                            target_directory=target_dir,
+                            migrated_directory=migrated_dir,
+                            dry_run=str(dry_run).lower(),
+                        ).inc()
+                else:
+                    logger.info(
+                        f"DRY RUN: Would move folder: {folder_name} "
+                        f"-> {target_migrated_path}"
+                    )
 
         # Record metrics for found folders
         migrate_folders_found_total.labels(
@@ -482,7 +603,8 @@ async def migrate_non_movie_folders(
         logger.info(
             f"Non-movie folder migration completed: found={len(folders_to_migrate)}, "
             f"moved={len(moved_folders)}, skipped={len(skipped_folders)}, "
-            f"errors={len(errors)}, duration={operation_duration:.2f}s, "
+            f"deleted={len(deleted_folders)}, errors={len(errors)}, "
+            f"duration={operation_duration:.2f}s, "
             f"batch_limit_reached={batch_limit_hit}"
         )
 
@@ -491,9 +613,11 @@ async def migrate_non_movie_folders(
             "migrated_directory": str(migrated_path),
             "dry_run": dry_run,
             "batch_size": batch_size,
+            "delete_source_if_match": delete_source_if_match,
             "folders_found": len(folders_to_migrate),
             "folders_moved": len(moved_folders),
             "folders_skipped": len(skipped_folders),
+            "folders_deleted": len(deleted_folders),
             "errors": len(errors),
             "batch_limit_reached": batch_limit_hit,
             "remaining_folders": (
@@ -506,6 +630,7 @@ async def migrate_non_movie_folders(
             ],
             "moved_folders": moved_folders,
             "skipped_folders": skipped_folders,
+            "deleted_folders": deleted_folders,
             "error_details": errors,
         }
 

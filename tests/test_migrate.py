@@ -172,6 +172,104 @@ class TestNonMovieFolderMigration(unittest.TestCase):
         self.assertTrue((self.test_path / "to_migrate").exists())
         self.assertTrue((self.migrated_path / "to_migrate").exists())
 
+    def test_delete_source_if_match_exact_match_deletes_source(self):
+        """When dest exists with exact match (only subtitles, same content), delete source."""
+        (self.test_path / "subs_only").mkdir()
+        (self.test_path / "subs_only" / "en.srt").write_text("sub")
+        (self.test_path / "subs_only" / "Subs").mkdir()
+        (self.test_path / "subs_only" / "Subs" / "fr.srt").write_text("sub")
+
+        (self.migrated_path / "subs_only").mkdir()
+        (self.migrated_path / "subs_only" / "en.srt").write_text("sub")
+        (self.migrated_path / "subs_only" / "Subs").mkdir()
+        (self.migrated_path / "subs_only" / "Subs" / "fr.srt").write_text(
+            "sub"
+        )
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&delete_source_if_match=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_deleted"], 1)
+        self.assertIn("subs_only", data["deleted_folders"])
+        self.assertFalse((self.test_path / "subs_only").exists())
+        self.assertTrue((self.migrated_path / "subs_only" / "en.srt").exists())
+
+    def test_delete_source_if_match_skips_when_not_only_subtitles(self):
+        """When folder has non-subtitle files, skip delete even if dest matches."""
+        (self.test_path / "has_nfo").mkdir()
+        (self.test_path / "has_nfo" / "en.srt").write_text("sub")
+        (self.test_path / "has_nfo" / "movie.nfo").write_text("nfo")
+
+        (self.migrated_path / "has_nfo").mkdir()
+        (self.migrated_path / "has_nfo" / "en.srt").write_text("sub")
+        (self.migrated_path / "has_nfo" / "movie.nfo").write_text("nfo")
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&delete_source_if_match=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_deleted"], 0)
+        self.assertGreater(data["folders_skipped"], 0)
+        self.assertTrue((self.test_path / "has_nfo").exists())
+
+    def test_delete_source_if_match_skips_when_contents_differ(self):
+        """When file sizes differ, skip delete even if only subtitles."""
+        (self.test_path / "diff_content").mkdir()
+        (self.test_path / "diff_content" / "en.srt").write_text("a")
+
+        (self.migrated_path / "diff_content").mkdir()
+        (self.migrated_path / "diff_content" / "en.srt").write_text("ab")
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&delete_source_if_match=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_deleted"], 0)
+        self.assertGreater(data["folders_skipped"], 0)
+        self.assertTrue((self.test_path / "diff_content").exists())
+
+    def test_delete_source_if_match_dry_run(self):
+        """Dry run reports would delete when exact match."""
+        (self.test_path / "would_delete").mkdir()
+        (self.test_path / "would_delete" / "en.srt").write_text("x")
+
+        (self.migrated_path / "would_delete").mkdir()
+        (self.migrated_path / "would_delete" / "en.srt").write_text("x")
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=true"
+            "&delete_source_if_match=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_deleted"], 1)
+        self.assertIn("would_delete", data["deleted_folders"])
+        self.assertTrue((self.test_path / "would_delete").exists())
+
+    def test_delete_source_if_match_default_false(self):
+        """Without delete_source_if_match, dest exists still skips (no delete)."""
+        (self.test_path / "no_delete").mkdir()
+        (self.test_path / "no_delete" / "en.srt").write_text("x")
+
+        (self.migrated_path / "no_delete").mkdir()
+        (self.migrated_path / "no_delete" / "en.srt").write_text("x")
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_deleted"], 0)
+        self.assertGreater(data["folders_skipped"], 0)
+        self.assertTrue((self.test_path / "no_delete").exists())
+
     def test_migrate_non_movie_folders_nested(self):
         """Test that first-level folders with nested subdirectories are migrated"""
         response = client.post(
