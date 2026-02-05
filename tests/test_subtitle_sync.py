@@ -79,6 +79,8 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "subtitle.srt").touch()
         (movie / "Subs").mkdir()
         (movie / "Subs" / "en.srt").touch()
+        (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged"
@@ -97,6 +99,8 @@ class TestSubtitleSync(unittest.TestCase):
         movie = self.migrated_dir / "Movie2"
         movie.mkdir()
         (movie / "sub.srt").touch()
+        (self.target_dir / "Movie2").mkdir()
+        (self.target_dir / "Movie2" / "movie.mkv").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=migrated"
@@ -114,6 +118,8 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "subtitle.srt").write_text("content")
         (movie / "Subs").mkdir()
         (movie / "Subs" / "en.srt").write_text("en")
+        (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
@@ -139,6 +145,8 @@ class TestSubtitleSync(unittest.TestCase):
         movie = self.salvaged_dir / "Some Movie"
         movie.mkdir()
         (movie / "sub.srt").write_text("sub")
+        (self.target_dir / "Some Movie").mkdir()
+        (self.target_dir / "Some Movie" / "movie.mkv").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
@@ -154,6 +162,8 @@ class TestSubtitleSync(unittest.TestCase):
         movie.mkdir()
         (movie / "Subs").mkdir()
         (movie / "Subs" / "en.srt").write_text("en")
+        (self.target_dir / "MovieB").mkdir()
+        (self.target_dir / "MovieB" / "movie.mp4").touch()
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
         )
@@ -172,6 +182,7 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "Subs" / "b.srt").write_text("b")
 
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         (self.target_dir / "Movie1" / "a.srt").write_text("a")
         (self.target_dir / "Movie1" / "Subs").mkdir()
         (self.target_dir / "Movie1" / "Subs" / "b.srt").write_text("b")
@@ -187,12 +198,14 @@ class TestSubtitleSync(unittest.TestCase):
         self.assertTrue((movie / "Subs" / "b.srt").exists())
 
     def test_sync_none_in_target_all_copied(self):
-        """When nothing exists in target, all subtitle files are moved."""
+        """When movie dir exists but no subtitle files in target, all moved."""
         movie = self.salvaged_dir / "Movie1"
         movie.mkdir()
         (movie / "one.srt").write_text("1")
         (movie / "Subs").mkdir()
         (movie / "Subs" / "two.srt").write_text("2")
+        (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
@@ -218,6 +231,7 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "Subs" / "also_missing.srt").write_text("also")
 
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         (self.target_dir / "Movie1" / "existing.srt").write_text("keep")
 
         response = client.post(
@@ -241,6 +255,139 @@ class TestSubtitleSync(unittest.TestCase):
             "also",
         )
 
+    def test_sync_skips_movie_when_no_matching_target_dir(self):
+        """When target has no matching movie directory, entire folder skipped."""
+        movie = self.salvaged_dir / "OrphanMovie"
+        movie.mkdir()
+        (movie / "en.srt").write_text("x")
+        # No target/OrphanMovie - do not create it
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["subtitle_files_moved"], 0)
+        self.assertEqual(data["subtitle_files_skipped"], 0)
+        self.assertFalse((self.target_dir / "OrphanMovie").exists())
+        self.assertTrue((movie / "en.srt").exists())
+
+    def test_sync_include_metadata_files(self):
+        """When include_metadata_files=True, also moves .nfo, .sfv, .jpg."""
+        movie = self.salvaged_dir / "MovieWithMeta"
+        movie.mkdir()
+        (movie / "en.srt").write_text("sub")
+        (movie / "movie.nfo").write_text("nfo content")
+        (movie / "movie.sfv").write_text("sfv content")
+        (movie / "poster.jpg").write_text("poster")
+        (self.target_dir / "MovieWithMeta").mkdir()
+        (self.target_dir / "MovieWithMeta" / "movie.mp4").touch()
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+            "&include_metadata_files=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["include_metadata_files"])
+        self.assertEqual(data["subtitle_files_moved"], 4)
+        self.assertEqual(
+            (self.target_dir / "MovieWithMeta" / "en.srt").read_text(),
+            "sub",
+        )
+        self.assertEqual(
+            (self.target_dir / "MovieWithMeta" / "movie.nfo").read_text(),
+            "nfo content",
+        )
+        self.assertEqual(
+            (self.target_dir / "MovieWithMeta" / "movie.sfv").read_text(),
+            "sfv content",
+        )
+        self.assertEqual(
+            (self.target_dir / "MovieWithMeta" / "poster.jpg").read_text(),
+            "poster",
+        )
+
+    def test_sync_excludes_metadata_files_by_default(self):
+        """By default, only subtitles are moved; .nfo, .sfv stay in source."""
+        movie = self.salvaged_dir / "MovieMetaDefault"
+        movie.mkdir()
+        (movie / "en.srt").write_text("sub")
+        (movie / "movie.nfo").write_text("nfo")
+        (self.target_dir / "MovieMetaDefault").mkdir()
+        (self.target_dir / "MovieMetaDefault" / "movie.mp4").touch()
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data.get("include_metadata_files", False))
+        self.assertEqual(data["subtitle_files_moved"], 1)
+        self.assertTrue((movie / "movie.nfo").exists())
+        self.assertFalse(
+            (self.target_dir / "MovieMetaDefault" / "movie.nfo").exists()
+        )
+
+    def test_sync_skips_target_when_no_movie_file(self):
+        """When target dir exists but has no movie file, entire folder skipped."""
+        movie = self.salvaged_dir / "NoMovieFile"
+        movie.mkdir()
+        (movie / "en.srt").write_text("x")
+        (self.target_dir / "NoMovieFile").mkdir()
+        (self.target_dir / "NoMovieFile" / "readme.nfo").write_text("nfo")
+        # No .mp4/.mkv etc. in target - only nfo
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["subtitle_files_moved"], 0)
+        self.assertEqual(data["subtitle_files_skipped"], 0)
+        self.assertFalse((self.target_dir / "NoMovieFile" / "en.srt").exists())
+        self.assertTrue((movie / "en.srt").exists())
+
+    def test_sync_only_processes_movies_with_target_dir(self):
+        """Only movies with matching target dir are processed; others skipped."""
+        (self.salvaged_dir / "HasTarget").mkdir()
+        (self.salvaged_dir / "HasTarget" / "a.srt").write_text("a")
+        (self.salvaged_dir / "NoTarget").mkdir()
+        (self.salvaged_dir / "NoTarget" / "b.srt").write_text("b")
+        (self.target_dir / "HasTarget").mkdir()
+        (self.target_dir / "HasTarget" / "movie.mp4").touch()
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["subtitle_files_moved"], 1)
+        self.assertIn("HasTarget/a.srt", data["moved_files"])
+        self.assertEqual(
+            (self.target_dir / "HasTarget" / "a.srt").read_text(), "a"
+        )
+        self.assertFalse((self.target_dir / "NoTarget").exists())
+        self.assertTrue((self.salvaged_dir / "NoTarget" / "b.srt").exists())
+
+    def test_sync_creates_subs_folder_when_movie_exists(self):
+        """Creates Subs folder under existing movie dir when needed."""
+        (self.salvaged_dir / "Movie1").mkdir()
+        (self.salvaged_dir / "Movie1" / "Subs").mkdir()
+        (self.salvaged_dir / "Movie1" / "Subs" / "en.srt").write_text("en")
+        (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
+        # No target/Movie1/Subs yet
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue((self.target_dir / "Movie1" / "Subs").is_dir())
+        self.assertEqual(
+            (self.target_dir / "Movie1" / "Subs" / "en.srt").read_text(), "en"
+        )
+
     def test_sync_subtitles_skips_existing_file(self):
         """Sync skips files that already exist in target (single file)."""
         movie = self.salvaged_dir / "Movie1"
@@ -249,6 +396,7 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "other.srt").write_text("other")
 
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         (self.target_dir / "Movie1" / "subtitle.srt").write_text("existing")
 
         response = client.post(
@@ -270,6 +418,8 @@ class TestSubtitleSync(unittest.TestCase):
         """batch_size limits number of files moved per request."""
         movie = self.salvaged_dir / "Movie1"
         movie.mkdir()
+        (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         for i in range(5):
             (movie / f"sub{i}.srt").touch()
 
@@ -295,6 +445,8 @@ class TestSubtitleSync(unittest.TestCase):
         """Files are processed in sorted path order for re-entrant batch_size."""
         movie = self.salvaged_dir / "Movie1"
         movie.mkdir()
+        (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         (movie / "root.srt").write_text("root")
         (movie / "Subs").mkdir()
         (movie / "Subs" / "a.srt").write_text("a")
@@ -329,9 +481,11 @@ class TestSubtitleSync(unittest.TestCase):
         )
 
     def test_sync_creates_target_directory_when_missing(self):
-        """Target directory is created when it does not exist (salvage pattern)."""
+        """Target root is created when missing; movie dir must exist to sync."""
         target_missing = Path(self.test_dir) / "target_missing"
-        self.assertFalse(target_missing.exists())
+        target_missing.mkdir()
+        (target_missing / "Movie1").mkdir()
+        (target_missing / "Movie1" / "movie.mp4").touch()
         os.environ["TARGET_DIRECTORY"] = str(target_missing)
         from importlib import reload
         import app.main
@@ -396,7 +550,8 @@ class TestSubtitleSync(unittest.TestCase):
 
         (self.salvaged_dir / "Movie1").mkdir()
         (self.salvaged_dir / "Movie1" / "sub.srt").write_text("sub")
-        # target is first-level under salvaged; should be skipped, not processed
+        (target_inside / "Movie1").mkdir()
+        (target_inside / "Movie1" / "movie.mp4").touch()
         (target_inside / "existing.srt").write_text("existing")
 
         response = client.post(

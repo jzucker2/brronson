@@ -11,12 +11,17 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, HTTPException
 
 from ..config import (
+    DEFAULT_METADATA_EXTENSIONS,
     DEFAULT_SUBTITLE_EXTENSIONS,
     get_migrated_movies_directory,
     get_salvaged_movies_directory,
     get_target_directory,
 )
-from ..helpers import is_subtitle_file, validate_directory
+from ..helpers import (
+    folder_contains_movie_files,
+    is_subtitle_file,
+    validate_directory,
+)
 from ..metrics import (
     sync_subtitles_batch_operations_total,
     sync_subtitles_errors_total,
@@ -30,27 +35,36 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _collect_subtitle_files(
+def _collect_sync_files(
     movie_folder: Path,
     subtitle_extensions: List[str],
+    metadata_extensions: Optional[List[str]] = None,
 ) -> List[Path]:
     """
-    Collect all subtitle files under a movie folder (recursive), sorted by path.
+    Collect subtitle and optionally metadata files under a movie folder.
 
     Args:
         movie_folder: Path to the movie folder (first-level under source).
         subtitle_extensions: List of subtitle file extensions (with leading dot).
+        metadata_extensions: If provided, also include these extensions
+                            (e.g. .nfo, .sfv, .jpg). If None, subtitles only.
 
     Returns:
-        List of Path objects for subtitle files, sorted by path for deterministic
-        order (re-entrant batch_size behavior).
+        List of Path objects, sorted by path for deterministic order.
     """
     files = []
+    meta_set = (
+        {ext.lower() for ext in metadata_extensions}
+        if metadata_extensions
+        else set()
+    )
     try:
         for root, _dirs, filenames in os.walk(movie_folder):
             for name in filenames:
                 p = Path(root) / name
                 if is_subtitle_file(p, subtitle_extensions):
+                    files.append(p)
+                elif meta_set and p.suffix.lower() in meta_set:
                     files.append(p)
     except (OSError, PermissionError):
         pass
@@ -63,23 +77,30 @@ async def sync_subtitles_to_target(
     dry_run: bool = True,
     batch_size: int = 100,
     subtitle_extensions: Optional[List[str]] = None,
+    include_metadata_files: bool = False,
 ):
     """
-    Move subtitle files from source (salvaged or migrated) to target.
+    Move subtitle files (and optionally metadata) from source to target.
 
-    Scans the chosen source movies directory and moves subtitle files into the
-    target directory under each movie folder, preserving the same hierarchy
-    (equivalent path: source/Movie/Subs/en.srt -> target/Movie/Subs/en.srt).
-    Only moves when the destination file does not already exist. Creates
-    directories as needed. Skipped files do not count toward batch_size.
+    Only processes movie folders that already exist in the target directory and
+    contain at least one movie file. For each such movie, moves subtitle files
+    to the equivalent path (root or Subs/), creating the Subs folder if needed.
+    When include_metadata_files=True, also moves .nfo, .sfv, .srr, .jpg, etc.
+    Skips entire movie folders when no matching directory exists in target
+    (never creates movie directories) or when the target directory has no movie
+    file. Only moves when the destination file does not already exist. Skipped
+    files do not count toward batch_size.
 
     Args:
         source: Source of subtitles: "salvaged" or "migrated".
         dry_run: If True, only report what would be moved (default: True).
-        batch_size: Maximum number of subtitle files to move per request
-                    (default: 100). Only actually moved files count.
+        batch_size: Maximum number of files to move per request (default: 100).
+                    Only actually moved files count.
         subtitle_extensions: List of subtitle file extensions (with leading dot).
                              If None, uses DEFAULT_SUBTITLE_EXTENSIONS.
+        include_metadata_files: If True, also move metadata files (.nfo, .sfv,
+                               .srr, .jpg, .png, etc.) in addition to subtitles
+                               (default: False).
 
     Returns:
         dict: Sync results including source, target, counts, and errors.
@@ -101,6 +122,9 @@ async def sync_subtitles_to_target(
 
     if subtitle_extensions is None:
         subtitle_extensions = DEFAULT_SUBTITLE_EXTENSIONS
+    metadata_extensions = (
+        DEFAULT_METADATA_EXTENSIONS if include_metadata_files else None
+    )
 
     try:
         source_path = Path(source_dir).resolve()
@@ -189,12 +213,24 @@ async def sync_subtitles_to_target(
                 batch_limit_hit = True
                 break
 
-            subtitle_files = _collect_subtitle_files(
-                movie_folder, subtitle_extensions
-            )
             rel_base = movie_folder.name
             target_movie_base = target_path / rel_base
+            if not target_movie_base.is_dir():
+                logger.debug(
+                    f"Skipping {rel_base}: no matching movie directory in target"
+                )
+                continue
+            if not folder_contains_movie_files(target_movie_base):
+                logger.debug(
+                    f"Skipping {rel_base}: no movie file in target directory"
+                )
+                continue
 
+            subtitle_files = _collect_sync_files(
+                movie_folder,
+                subtitle_extensions,
+                metadata_extensions,
+            )
             for src_file in subtitle_files:
                 if files_moved >= batch_size:
                     batch_limit_hit = True
@@ -275,6 +311,7 @@ async def sync_subtitles_to_target(
             "dry_run": dry_run,
             "batch_size": batch_size,
             "subtitle_extensions": subtitle_extensions,
+            "include_metadata_files": include_metadata_files,
             "subtitle_files_moved": files_moved,
             "subtitle_files_skipped": files_skipped,
             "moved_files": moved_files,

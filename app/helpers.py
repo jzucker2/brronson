@@ -8,6 +8,7 @@ from typing import List
 from fastapi import HTTPException
 
 from .config import (
+    DEFAULT_MOVIE_EXTENSIONS,
     get_migrated_movies_directory,
     get_recycled_movies_directory,
     get_salvaged_movies_directory,
@@ -317,6 +318,33 @@ def has_subtitle_in_root(
                     return True
     except Exception:
         pass  # Return False if directory can't be read
+    return False
+
+
+def folder_contains_movie_files(
+    folder_path: Path, movie_extensions: List[str] = None
+) -> bool:
+    """
+    Check if a folder (recursively) contains any movie files.
+
+    Args:
+        folder_path: Path to the folder to check
+        movie_extensions: List of movie file extensions (with leading dot).
+                         If None, uses DEFAULT_MOVIE_EXTENSIONS.
+
+    Returns:
+        True if the folder contains at least one movie file, False otherwise
+    """
+    if movie_extensions is None:
+        movie_extensions = DEFAULT_MOVIE_EXTENSIONS
+    ext_set = {ext.lower() for ext in movie_extensions}
+    try:
+        for root, _dirs, files in os.walk(folder_path):
+            for name in files:
+                if Path(name).suffix.lower() in ext_set:
+                    return True
+    except (OSError, PermissionError):
+        return False
     return False
 
 

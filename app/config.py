@@ -42,6 +42,17 @@ DEFAULT_SUBTITLE_EXTENSIONS = [
     ".txt",  # Some subtitle files use .txt extension
 ]
 
+# Default metadata/extras file extensions (case-insensitive)
+DEFAULT_METADATA_EXTENSIONS = [
+    ".nfo",
+    ".sfv",
+    ".srr",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+]
+
 # Default movie/video file extensions (case-insensitive)
 DEFAULT_MOVIE_EXTENSIONS = [
     ".avi",

@@ -525,6 +525,26 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
 curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&batch_size=50"
 ```
 
+**Delete source when exact match exists (subtitle-only folders):**
+
+```bash
+# When destination exists with identical contents (only subtitles, same structure/sizes), delete source
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&delete_source_if_match=true"
+```
+
+**Merge missing files when destination exists:**
+
+```bash
+# Copy files from source that are not in destination, then optionally delete source
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&merge_missing_files=true"
+
+# Merge and delete source after copying
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&merge_missing_files=true&delete_source_after_merge=true"
+
+# Delete redundant source when nothing to merge (dest has all, source is subset)
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&merge_missing_files=true&delete_source_when_nothing_to_merge=true"
+```
+
 **Response format:**
 
 ```json
@@ -533,15 +553,24 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
   "migrated_directory": "/path/to/migrated",
   "dry_run": true,
   "batch_size": 100,
+  "delete_source_if_match": false,
+  "merge_missing_files": false,
+  "delete_source_after_merge": false,
+  "delete_source_when_nothing_to_merge": false,
   "folders_found": 5,
   "folders_moved": 0,
   "folders_skipped": 0,
+  "folders_deleted": 0,
+  "folders_merged": 0,
+  "files_merged": 0,
   "errors": 0,
   "batch_limit_reached": false,
   "remaining_folders": 0,
   "folders_to_migrate": ["folder1", "folder2", "folder3"],
   "moved_folders": [],
   "skipped_folders": [],
+  "deleted_folders": [],
+  "merged_folders": [],
   "error_details": []
 }
 ```
@@ -555,9 +584,12 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
 - **Batch Processing**: Default `batch_size=100` allows processing in batches for re-entrant operations
 - **Re-entrant**: Can be called multiple times to resume from where it stopped
 - **Skip Existing**: If a destination folder already exists, it is skipped (not overwritten) and logged
+- **Delete Source If Match**: When `delete_source_if_match=true` and destination exists with exact contents (folder contains only subtitles, same structure and file sizes), the source folder is deleted instead of skipped
+- **Merge Missing Files**: When `merge_missing_files=true` and destination exists, copies files from source that are not in destination; use `delete_source_after_merge=true` to remove the source folder after merging
+- **Delete Source When Nothing To Merge**: When `merge_missing_files=true` and destination exists with no files to copy (source is subset or empty), use `delete_source_when_nothing_to_merge=true` to remove the redundant source folder
 - **Error Handling**: Comprehensive error reporting for failed moves
 - **Progress Tracking**: `remaining_folders` field shows how many folders still need to be processed
-- **Prometheus Metrics**: Records found, moved, skipped, and error metrics
+- **Prometheus Metrics**: Records found, moved, skipped, merged, deleted, and error metrics
 
 **Movie File Extensions:**
 
@@ -670,7 +702,7 @@ This design ensures that if a first-level folder has no movie files anywhere wit
 
 #### Sync Subtitles to Target Usage
 
-The sync subtitles endpoint moves subtitle files from either the salvaged or migrated movies directory into the target directory. For each movie folder in the source, subtitles are placed at the equivalent path under target (e.g. `source/Movie/Subs/en.srt` → `target/Movie/Subs/en.srt`); hierarchy is preserved. Files are only moved when the destination does not already exist. Skipped items do not count toward `batch_size`, making the operation re-entrant.
+The sync subtitles endpoint moves subtitle files from either the salvaged or migrated movies directory into the target directory. **Only movie folders that already exist in the target and contain at least one movie file are processed** – if there is no matching movie directory in target, or the target directory has no movie file (e.g. only .nfo, .sfv), the entire folder is skipped (the movie directory is never created). For each matching movie, subtitles are placed at the equivalent path (root or `Subs/`); the `Subs` folder is created if needed. Files are only moved when the destination does not already exist. Skipped items do not count toward `batch_size`, making the operation re-entrant.
 
 **Configuration:**
 
@@ -694,8 +726,15 @@ curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=migra
 **Use batch_size for re-entrant operations:**
 
 ```bash
-# Move up to 50 subtitle files per request (skipped files don't count)
+# Move up to 50 files per request (skipped files don't count)
 curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false&batch_size=50"
+```
+
+**Include metadata files (.nfo, .sfv, .jpg, etc.):**
+
+```bash
+# Also move .nfo, .sfv, .srr, .jpg, .png, .gif in addition to subtitles
+curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false&include_metadata_files=true"
 ```
 
 **Response format:**
@@ -708,6 +747,7 @@ curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salva
   "dry_run": true,
   "batch_size": 100,
   "subtitle_extensions": [".srt", ".sub", ".vtt", ...],
+  "include_metadata_files": false,
   "subtitle_files_moved": 0,
   "subtitle_files_skipped": 0,
   "moved_files": [],
@@ -721,7 +761,10 @@ curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salva
 **Features:**
 
 - **Source choice**: Query param `source=salvaged` or `source=migrated` selects the subtitle source
-- **Equivalent path**: Preserves hierarchy; each file goes to the same relative path under target (e.g. root stays root, Subs/en.srt stays Subs/en.srt)
+- **Include metadata files**: When `include_metadata_files=true`, also moves .nfo, .sfv, .srr, .jpg, .png, .gif in addition to subtitles
+- **Target movie must exist**: Only processes source movie folders that have a matching directory in target; skips entirely when no match (never creates movie directories)
+- **Target must have movie file**: Skips target directories that have no movie file (e.g. only .nfo, .sfv, or empty); prevents syncing subtitles into orphan metadata folders
+- **Equivalent path**: Preserves hierarchy; each file goes to the same relative path under target (e.g. root stays root, Subs/en.srt stays Subs/en.srt); creates `Subs` folder when needed
 - **Skip existing**: Does not overwrite; if a file (or path) already exists in target, it is skipped and not counted toward `batch_size`
 - **Batch processing**: `batch_size` limits how many files are moved per request (default: 100); only actually moved files count
 - **Re-entrant**: Safe to call repeatedly; skipped files do not count toward the limit
@@ -795,6 +838,7 @@ The application uses [prometheus-fastapi-instrumentator](https://github.com/tral
 - `brronson_migrate_folders_found_total` - Total number of folders without movie files found (labels: target_directory, dry_run)
 - `brronson_migrate_folders_moved_total` - Total number of folders successfully moved to migrated directory (labels: target_directory, migrated_directory, dry_run)
 - `brronson_migrate_folders_skipped_total` - Total number of folders skipped during migration (target already exists) (labels: target_directory, migrated_directory, dry_run)
+- `brronson_migrate_folders_deleted_total` - Total number of source folders deleted when exact match exists in migrated (labels: target_directory, migrated_directory, dry_run)
 - `brronson_migrate_errors_total` - Total errors during folder migration operations (labels: target_directory, migrated_directory, error_type)
 - `brronson_migrate_operation_duration_seconds` - Time spent on folder migration operations (labels: operation_type, target_directory, migrated_directory)
 - `brronson_migrate_batch_operations_total` - Total number of batch operations performed (labels: target_directory, migrated_directory, batch_size, dry_run)

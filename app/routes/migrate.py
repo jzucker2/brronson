@@ -13,14 +13,18 @@ from fastapi import APIRouter, HTTPException
 
 from ..config import (
     DEFAULT_MOVIE_EXTENSIONS,
+    DEFAULT_SUBTITLE_EXTENSIONS,
     get_migrated_movies_directory,
     get_target_directory,
 )
-from ..helpers import validate_directory
+from ..helpers import is_subtitle_file, validate_directory
 from ..metrics import (
     migrate_batch_operations_total,
     migrate_errors_total,
+    migrate_files_merged_total,
+    migrate_folders_deleted_total,
     migrate_folders_found_total,
+    migrate_folders_merged_total,
     migrate_folders_moved_total,
     migrate_folders_skipped_total,
     migrate_operation_duration,
@@ -92,6 +96,163 @@ def folder_contains_movie_files(
         # to be safe (don't migrate folders we can't read)
         return True
     return False
+
+
+# Files to ignore when comparing/checking folder contents (e.g. macOS metadata)
+_IGNORE_FILES = {".DS_Store"}
+
+
+def _folder_contains_only_subtitles(
+    folder_path: Path, subtitle_extensions: List[str]
+) -> bool:
+    """
+    Check if a folder contains only subtitle files (recursively).
+
+    Ignores _IGNORE_FILES (e.g. .DS_Store) so folders with subtitles + metadata
+    are treated as subtitle-only, consistent with _contents_match.
+
+    Args:
+        folder_path: Path to the folder to check
+        subtitle_extensions: List of subtitle file extensions (with leading dot)
+
+    Returns:
+        True if all non-ignored files in the folder are subtitle files, False
+        otherwise
+    """
+    try:
+        for root, _dirs, files in os.walk(folder_path):
+            for name in files:
+                if name in _IGNORE_FILES:
+                    continue
+                p = Path(root) / name
+                if not is_subtitle_file(p, subtitle_extensions):
+                    return False
+    except (OSError, PermissionError):
+        return False
+    return True
+
+
+def _get_files_only_in_source(
+    source_dir: Path, dest_dir: Path, ignore_files: Set[str] = None
+) -> List[tuple]:
+    """
+    Get list of (relative_path, source_path) for files in source but not in dest.
+
+    Uses dest_path.exists() to check presence, so case-insensitive filesystems
+    (macOS, Windows) correctly treat differently-cased paths as the same file
+    and avoid overwriting.
+
+    Args:
+        source_dir: Source directory path
+        dest_dir: Destination directory path
+        ignore_files: Set of filenames to ignore. Defaults to _IGNORE_FILES.
+
+    Returns:
+        List of (relative_path_str, source_path) tuples
+    """
+    if ignore_files is None:
+        ignore_files = _IGNORE_FILES
+    try:
+        result = []
+        for root, _dirs, files in os.walk(source_dir):
+            for name in files:
+                if name in ignore_files:
+                    continue
+                p = Path(root) / name
+                rel = p.relative_to(source_dir)
+                dest_path = dest_dir / rel
+                if not dest_path.exists():
+                    result.append((str(rel), p))
+        return result
+    except (ValueError, OSError):
+        return []
+
+
+def _merge_missing_files(
+    source_dir: Path,
+    dest_dir: Path,
+    files_to_copy: List[tuple],
+) -> tuple:
+    """
+    Copy files from source to destination, creating parent dirs as needed.
+
+    Args:
+        source_dir: Source directory path
+        dest_dir: Destination directory path
+        files_to_copy: List of (relative_path_str, source_path) from
+                       _get_files_only_in_source
+
+    Returns:
+        (files_copied_count, list_of_error_messages)
+    """
+    copied = 0
+    errors = []
+    for rel_str, src_path in files_to_copy:
+        dest_path = dest_dir / rel_str
+        try:
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src_path), str(dest_path))
+            copied += 1
+        except OSError as e:
+            errors.append(f"Failed to copy {rel_str}: {e}")
+    return (copied, errors)
+
+
+def _contents_match(
+    source_dir: Path, dest_dir: Path, log_mismatch_prefix: str = None
+) -> bool:
+    """
+    Check if two directories have identical contents (same structure, file sizes).
+
+    Args:
+        source_dir: Source directory path
+        dest_dir: Destination directory path
+        log_mismatch_prefix: If provided, log reason when mismatch (e.g. folder name)
+
+    Returns:
+        True if same relative paths and file sizes, False otherwise
+    """
+    try:
+        source_files = {}
+        for root, _dirs, files in os.walk(source_dir):
+            for name in files:
+                if name in _IGNORE_FILES:
+                    continue
+                p = Path(root) / name
+                rel = p.relative_to(source_dir)
+                source_files[str(rel)] = p.stat().st_size
+        dest_files = {}
+        for root, _dirs, files in os.walk(dest_dir):
+            for name in files:
+                if name in _IGNORE_FILES:
+                    continue
+                p = Path(root) / name
+                rel = p.relative_to(dest_dir)
+                dest_files[str(rel)] = p.stat().st_size
+        if set(source_files.keys()) != set(dest_files.keys()):
+            if log_mismatch_prefix:
+                only_src = set(source_files.keys()) - set(dest_files.keys())
+                only_dest = set(dest_files.keys()) - set(source_files.keys())
+                logger.info(
+                    f"{log_mismatch_prefix}: file set differs - "
+                    f"only in source: {sorted(only_src)[:5]}{'...' if len(only_src) > 5 else ''}, "
+                    f"only in dest: {sorted(only_dest)[:5]}{'...' if len(only_dest) > 5 else ''}"
+                )
+            return False
+        for rel, size in source_files.items():
+            dest_size = dest_files.get(rel)
+            if dest_size != size:
+                if log_mismatch_prefix:
+                    logger.info(
+                        f"{log_mismatch_prefix}: size differs for {rel}: "
+                        f"source={size}, dest={dest_size}"
+                    )
+                return False
+        return True
+    except (ValueError, OSError) as e:
+        if log_mismatch_prefix:
+            logger.info(f"{log_mismatch_prefix}: compare failed: {e}")
+        return False
 
 
 def find_folders_without_movies(
@@ -232,7 +393,12 @@ def find_folders_without_movies(
 
 @router.post("/api/v1/migrate/non-movie-folders")
 async def migrate_non_movie_folders(
-    dry_run: bool = True, batch_size: int = 100
+    dry_run: bool = True,
+    batch_size: int = 100,
+    delete_source_if_match: bool = False,
+    merge_missing_files: bool = False,
+    delete_source_after_merge: bool = False,
+    delete_source_when_nothing_to_merge: bool = False,
 ):
     """
     Find and move folders that contain files but no movie files to migrated directory.
@@ -244,19 +410,40 @@ async def migrate_non_movie_folders(
       cleanup endpoint for those).
     - Moves those folders to the migrated movies directory
     - Supports batch processing for re-entrant operations
+    - When delete_source_if_match=True and destination exists with exact contents
+      (only subtitle files, same structure and sizes), deletes the source folder
+    - When merge_missing_files=True and destination exists, copies files from
+      source that are not in destination, then optionally deletes the source
+    - When delete_source_when_nothing_to_merge=True and destination exists
+      with no files to merge (source is subset/empty), deletes the source folder
 
     Args:
         dry_run: If True, only show what would be moved (default: True)
         batch_size: Maximum number of folders to scan and process per request
-                   (default: 100). If provided, scanning stops once this many folders
-                   are found. If not provided or 0, performs a full scan
+                   (default: 100). If provided, scanning stops once this many
+                   folders are found. If not provided or 0, performs a full scan
                    of the entire directory. Only counts folders actually moved,
                    not skipped folders. This makes the operation re-entrant -
-                   subsequent requests will continue from where the previous request
-                   stopped.
+                   subsequent requests will continue from where the previous
+                   request stopped.
+        delete_source_if_match: If True, when destination already exists and
+                               source contains only subtitles with exact match
+                               (same structure and file sizes), delete the
+                               source folder instead of skipping (default: False)
+        merge_missing_files: If True, when destination exists, copy files from
+                            source that are not in destination (default: False)
+        delete_source_after_merge: If True and merge_missing_files was used,
+                                  delete the source folder after copying
+                                  (default: False)
+        delete_source_when_nothing_to_merge: If True and merge_missing_files
+                                            with destination existing but no
+                                            files to copy (source is subset),
+                                            delete the redundant source folder
+                                            (default: False)
 
     Returns:
-        dict: Migration results including folders found, moved, skipped, and errors
+        dict: Migration results including folders found, moved, skipped, deleted,
+              merged, and errors
     """
     start_time = time.time()
     target_dir = get_target_directory()
@@ -344,6 +531,9 @@ async def migrate_non_movie_folders(
             f"Folder scan completed: Found {len(folders_to_migrate)} folders "
             f"without movie files in {target_path}"
         )
+        # Process symlinks before their targets so delete_source_if_match
+        # can unlink symlinks before the target dir is moved
+        folders_to_migrate.sort(key=lambda p: (not p.is_symlink(), p.name))
         if folders_to_migrate:
             logger.info(
                 f"Folders to migrate: {', '.join([f.name for f in folders_to_migrate[:10]])}{'...' if len(folders_to_migrate) > 10 else ''}"
@@ -351,6 +541,9 @@ async def migrate_non_movie_folders(
 
         moved_folders = []
         skipped_folders = []
+        deleted_folders = []
+        merged_folders = []
+        merged_files_count = 0
         errors = []
         # batch_limit_reached is True if:
         # - batch_size > 0 (a limit was set)
@@ -385,16 +578,191 @@ async def migrate_non_movie_folders(
                 try:
                     # Check if destination already exists
                     if target_migrated_path.exists():
-                        logger.info(
-                            f"Skipping folder (destination exists): {folder_name} "
-                            f"-> {target_migrated_path}"
-                        )
-                        skipped_folders.append(folder_name)
-                        migrate_folders_skipped_total.labels(
-                            target_directory=target_dir,
-                            migrated_directory=migrated_dir,
-                            dry_run=str(dry_run).lower(),
-                        ).inc()
+                        if (
+                            delete_source_if_match
+                            and _folder_contains_only_subtitles(
+                                folder_path, DEFAULT_SUBTITLE_EXTENSIONS
+                            )
+                            and _contents_match(
+                                folder_path,
+                                target_migrated_path,
+                                log_mismatch_prefix=f"{folder_name}",
+                            )
+                        ):
+                            logger.info(
+                                f"Deleting source (exact match in migrated): "
+                                f"{folder_name}"
+                            )
+                            try:
+                                if folder_path.is_symlink():
+                                    folder_path.unlink()
+                                else:
+                                    shutil.rmtree(str(folder_path))
+                                deleted_folders.append(folder_name)
+                                migrate_folders_deleted_total.labels(
+                                    target_directory=target_dir,
+                                    migrated_directory=migrated_dir,
+                                    dry_run=str(dry_run).lower(),
+                                ).inc()
+                            except OSError as e:
+                                error_msg = (
+                                    f"Failed to delete source: {folder_path}: "
+                                    f"{str(e)}"
+                                )
+                                logger.error(error_msg)
+                                errors.append(error_msg)
+                                migrate_errors_total.labels(
+                                    target_directory=target_dir,
+                                    migrated_directory=migrated_dir,
+                                    error_type="folder_delete_error",
+                                ).inc()
+                        elif merge_missing_files:
+                            source_resolved = (
+                                folder_path.resolve()
+                                if folder_path.is_symlink()
+                                else folder_path
+                            )
+                            files_to_copy = _get_files_only_in_source(
+                                source_resolved, target_migrated_path
+                            )
+                            if files_to_copy:
+                                logger.info(
+                                    f"Merging {len(files_to_copy)} files from "
+                                    f"source into destination: {folder_name}"
+                                )
+                                copied, merge_errors = _merge_missing_files(
+                                    source_resolved,
+                                    target_migrated_path,
+                                    files_to_copy,
+                                )
+                                merged_files_count += copied
+                                errors.extend(merge_errors)
+                                for err in merge_errors:
+                                    migrate_errors_total.labels(
+                                        target_directory=target_dir,
+                                        migrated_directory=migrated_dir,
+                                        error_type="merge_copy_error",
+                                    ).inc()
+                                merged_folders.append(folder_name)
+                                migrate_folders_merged_total.labels(
+                                    target_directory=target_dir,
+                                    migrated_directory=migrated_dir,
+                                    dry_run=str(dry_run).lower(),
+                                ).inc()
+                                migrate_files_merged_total.labels(
+                                    target_directory=target_dir,
+                                    migrated_directory=migrated_dir,
+                                    dry_run=str(dry_run).lower(),
+                                ).inc(
+                                    len(files_to_copy) if dry_run else copied
+                                )
+                                if (
+                                    delete_source_after_merge
+                                    and not dry_run
+                                    and not merge_errors
+                                ):
+                                    try:
+                                        if folder_path.is_symlink():
+                                            folder_path.unlink()
+                                        else:
+                                            shutil.rmtree(str(folder_path))
+                                        deleted_folders.append(folder_name)
+                                        migrate_folders_deleted_total.labels(
+                                            target_directory=target_dir,
+                                            migrated_directory=migrated_dir,
+                                            dry_run=str(dry_run).lower(),
+                                        ).inc()
+                                    except OSError as e:
+                                        error_msg = (
+                                            f"Failed to delete source after "
+                                            f"merge: {folder_path}: {str(e)}"
+                                        )
+                                        logger.error(error_msg)
+                                        errors.append(error_msg)
+                                        migrate_errors_total.labels(
+                                            target_directory=target_dir,
+                                            migrated_directory=migrated_dir,
+                                            error_type="folder_delete_error",
+                                        ).inc()
+                                elif (
+                                    delete_source_after_merge
+                                    and not dry_run
+                                    and merge_errors
+                                ):
+                                    logger.warning(
+                                        f"Skipping source delete (merge had "
+                                        f"copy errors): {folder_name}"
+                                    )
+                            elif delete_source_when_nothing_to_merge:
+                                logger.info(
+                                    f"Deleting source (nothing to merge, "
+                                    f"dest has all): {folder_name}"
+                                )
+                                try:
+                                    if folder_path.is_symlink():
+                                        folder_path.unlink()
+                                    else:
+                                        shutil.rmtree(str(folder_path))
+                                    deleted_folders.append(folder_name)
+                                    migrate_folders_deleted_total.labels(
+                                        target_directory=target_dir,
+                                        migrated_directory=migrated_dir,
+                                        dry_run=str(dry_run).lower(),
+                                    ).inc()
+                                except OSError as e:
+                                    error_msg = (
+                                        f"Failed to delete source: "
+                                        f"{folder_path}: {str(e)}"
+                                    )
+                                    logger.error(error_msg)
+                                    errors.append(error_msg)
+                                    migrate_errors_total.labels(
+                                        target_directory=target_dir,
+                                        migrated_directory=migrated_dir,
+                                        error_type="folder_delete_error",
+                                    ).inc()
+                            else:
+                                logger.info(
+                                    f"Skipping folder (no files to merge): "
+                                    f"{folder_name}"
+                                )
+                                skipped_folders.append(folder_name)
+                                migrate_folders_skipped_total.labels(
+                                    target_directory=target_dir,
+                                    migrated_directory=migrated_dir,
+                                    dry_run=str(dry_run).lower(),
+                                ).inc()
+                        else:
+                            if delete_source_if_match:
+                                reason = "not only subtitles"
+                                if _folder_contains_only_subtitles(
+                                    folder_path, DEFAULT_SUBTITLE_EXTENSIONS
+                                ):
+                                    reason = (
+                                        "contents differ"
+                                        if not _contents_match(
+                                            folder_path,
+                                            target_migrated_path,
+                                            log_mismatch_prefix=f"{folder_name}",
+                                        )
+                                        else "unknown"
+                                    )
+                                logger.info(
+                                    f"Skipping folder (destination exists, "
+                                    f"delete_source_if_match: {reason}): "
+                                    f"{folder_name} -> {target_migrated_path}"
+                                )
+                            else:
+                                logger.info(
+                                    f"Skipping folder (destination exists): "
+                                    f"{folder_name} -> {target_migrated_path}"
+                                )
+                            skipped_folders.append(folder_name)
+                            migrate_folders_skipped_total.labels(
+                                target_directory=target_dir,
+                                migrated_directory=migrated_dir,
+                                dry_run=str(dry_run).lower(),
+                            ).inc()
                         continue
 
                     # Check if source still exists (might have been moved already).
@@ -453,10 +821,109 @@ async def migrate_non_movie_folders(
                     # moves count. This ensures re-entrancy: persistent errors
                     # won't block progress on other folders.
             else:
-                logger.info(
-                    f"DRY RUN: Would move folder: {folder_name} "
-                    f"-> {target_migrated_path}"
-                )
+                if target_migrated_path.exists():
+                    if (
+                        delete_source_if_match
+                        and _folder_contains_only_subtitles(
+                            folder_path, DEFAULT_SUBTITLE_EXTENSIONS
+                        )
+                        and _contents_match(
+                            folder_path,
+                            target_migrated_path,
+                            log_mismatch_prefix=f"{folder_name}",
+                        )
+                    ):
+                        logger.info(
+                            f"DRY RUN: Would delete source (exact match): "
+                            f"{folder_name}"
+                        )
+                        deleted_folders.append(folder_name)
+                        migrate_folders_deleted_total.labels(
+                            target_directory=target_dir,
+                            migrated_directory=migrated_dir,
+                            dry_run=str(dry_run).lower(),
+                        ).inc()
+                    elif merge_missing_files:
+                        source_resolved = (
+                            folder_path.resolve()
+                            if folder_path.is_symlink()
+                            else folder_path
+                        )
+                        files_to_copy = _get_files_only_in_source(
+                            source_resolved, target_migrated_path
+                        )
+                        if files_to_copy:
+                            logger.info(
+                                f"DRY RUN: Would merge {len(files_to_copy)} "
+                                f"files: {folder_name}"
+                            )
+                            merged_folders.append(folder_name)
+                            merged_files_count += len(files_to_copy)
+                            migrate_folders_merged_total.labels(
+                                target_directory=target_dir,
+                                migrated_directory=migrated_dir,
+                                dry_run=str(dry_run).lower(),
+                            ).inc()
+                            migrate_files_merged_total.labels(
+                                target_directory=target_dir,
+                                migrated_directory=migrated_dir,
+                                dry_run=str(dry_run).lower(),
+                            ).inc(len(files_to_copy))
+                            if delete_source_after_merge:
+                                logger.info(
+                                    f"DRY RUN: Would delete source after "
+                                    f"merge: {folder_name}"
+                                )
+                                deleted_folders.append(folder_name)
+                                migrate_folders_deleted_total.labels(
+                                    target_directory=target_dir,
+                                    migrated_directory=migrated_dir,
+                                    dry_run=str(dry_run).lower(),
+                                ).inc()
+                        elif delete_source_when_nothing_to_merge:
+                            logger.info(
+                                f"DRY RUN: Would delete source (nothing to "
+                                f"merge): {folder_name}"
+                            )
+                            deleted_folders.append(folder_name)
+                            migrate_folders_deleted_total.labels(
+                                target_directory=target_dir,
+                                migrated_directory=migrated_dir,
+                                dry_run=str(dry_run).lower(),
+                            ).inc()
+                        else:
+                            logger.info(
+                                f"DRY RUN: Would skip (no files to merge): "
+                                f"{folder_name}"
+                            )
+                            skipped_folders.append(folder_name)
+                            migrate_folders_skipped_total.labels(
+                                target_directory=target_dir,
+                                migrated_directory=migrated_dir,
+                                dry_run=str(dry_run).lower(),
+                            ).inc()
+                    else:
+                        logger.info(
+                            f"DRY RUN: Would skip (destination exists): "
+                            f"{folder_name}"
+                        )
+                        skipped_folders.append(folder_name)
+                        migrate_folders_skipped_total.labels(
+                            target_directory=target_dir,
+                            migrated_directory=migrated_dir,
+                            dry_run=str(dry_run).lower(),
+                        ).inc()
+                else:
+                    logger.info(
+                        f"DRY RUN: Would move folder: {folder_name} "
+                        f"-> {target_migrated_path}"
+                    )
+                    moved_folders.append(folder_name)
+                    migrate_folders_moved_total.labels(
+                        target_directory=target_dir,
+                        migrated_directory=migrated_dir,
+                        dry_run=str(dry_run).lower(),
+                    ).inc()
 
         # Record metrics for found folders
         migrate_folders_found_total.labels(
@@ -482,6 +949,7 @@ async def migrate_non_movie_folders(
         logger.info(
             f"Non-movie folder migration completed: found={len(folders_to_migrate)}, "
             f"moved={len(moved_folders)}, skipped={len(skipped_folders)}, "
+            f"deleted={len(deleted_folders)}, merged={len(merged_folders)}, "
             f"errors={len(errors)}, duration={operation_duration:.2f}s, "
             f"batch_limit_reached={batch_limit_hit}"
         )
@@ -491,9 +959,18 @@ async def migrate_non_movie_folders(
             "migrated_directory": str(migrated_path),
             "dry_run": dry_run,
             "batch_size": batch_size,
+            "delete_source_if_match": delete_source_if_match,
+            "merge_missing_files": merge_missing_files,
+            "delete_source_after_merge": delete_source_after_merge,
+            "delete_source_when_nothing_to_merge": (
+                delete_source_when_nothing_to_merge
+            ),
             "folders_found": len(folders_to_migrate),
             "folders_moved": len(moved_folders),
             "folders_skipped": len(skipped_folders),
+            "folders_deleted": len(deleted_folders),
+            "folders_merged": len(merged_folders),
+            "files_merged": merged_files_count,
             "errors": len(errors),
             "batch_limit_reached": batch_limit_hit,
             "remaining_folders": (
@@ -506,6 +983,8 @@ async def migrate_non_movie_folders(
             ],
             "moved_folders": moved_folders,
             "skipped_folders": skipped_folders,
+            "deleted_folders": deleted_folders,
+            "merged_folders": merged_folders,
             "error_details": errors,
         }
 
