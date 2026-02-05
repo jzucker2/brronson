@@ -134,16 +134,21 @@ def _contents_match(
     Returns:
         True if same relative paths and file sizes, False otherwise
     """
+    IGNORE_FILES = {".DS_Store"}
     try:
         source_files = {}
         for root, _dirs, files in os.walk(source_dir):
             for name in files:
+                if name in IGNORE_FILES:
+                    continue
                 p = Path(root) / name
                 rel = p.relative_to(source_dir)
                 source_files[str(rel)] = p.stat().st_size
         dest_files = {}
         for root, _dirs, files in os.walk(dest_dir):
             for name in files:
+                if name in IGNORE_FILES:
+                    continue
                 p = Path(root) / name
                 rel = p.relative_to(dest_dir)
                 dest_files[str(rel)] = p.stat().st_size

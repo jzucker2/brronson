@@ -255,6 +255,25 @@ class TestNonMovieFolderMigration(unittest.TestCase):
         self.assertIn("would_delete", data["deleted_folders"])
         self.assertTrue((self.test_path / "would_delete").exists())
 
+    def test_delete_source_if_match_ignores_ds_store(self):
+        """DS_Store in dest is ignored when comparing contents for delete."""
+        (self.test_path / "with_ds_store").mkdir()
+        (self.test_path / "with_ds_store" / "en.srt").write_text("x")
+
+        (self.migrated_path / "with_ds_store").mkdir()
+        (self.migrated_path / "with_ds_store" / "en.srt").write_text("x")
+        (self.migrated_path / "with_ds_store" / ".DS_Store").write_text("junk")
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&delete_source_if_match=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_deleted"], 1)
+        self.assertIn("with_ds_store", data["deleted_folders"])
+        self.assertFalse((self.test_path / "with_ds_store").exists())
+
     def test_delete_source_if_match_default_false(self):
         """Without delete_source_if_match, dest exists still skips (no delete)."""
         (self.test_path / "no_delete").mkdir()
