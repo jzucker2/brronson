@@ -642,7 +642,11 @@ async def migrate_non_movie_folders(
                                 ).inc(
                                     len(files_to_copy) if dry_run else copied
                                 )
-                                if delete_source_after_merge and not dry_run:
+                                if (
+                                    delete_source_after_merge
+                                    and not dry_run
+                                    and not merge_errors
+                                ):
                                     try:
                                         if folder_path.is_symlink():
                                             folder_path.unlink()
@@ -666,13 +670,15 @@ async def migrate_non_movie_folders(
                                             migrated_directory=migrated_dir,
                                             error_type="folder_delete_error",
                                         ).inc()
-                                elif delete_source_after_merge and dry_run:
-                                    deleted_folders.append(folder_name)
-                                    migrate_folders_deleted_total.labels(
-                                        target_directory=target_dir,
-                                        migrated_directory=migrated_dir,
-                                        dry_run=str(dry_run).lower(),
-                                    ).inc()
+                                elif (
+                                    delete_source_after_merge
+                                    and not dry_run
+                                    and merge_errors
+                                ):
+                                    logger.warning(
+                                        f"Skipping source delete (merge had "
+                                        f"copy errors): {folder_name}"
+                                    )
                             else:
                                 logger.info(
                                     f"Skipping folder (no files to merge): "

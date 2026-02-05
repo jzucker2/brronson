@@ -618,6 +618,64 @@ class TestNonMovieFolderMigration(unittest.TestCase):
         )
         self.assertTrue((self.test_path / "dry_merge").exists())
 
+    def test_merge_copy_failure_skips_delete_preserves_source(self):
+        """When merge copy fails, do not delete source - preserve data."""
+        (self.test_path / "merge_fail").mkdir()
+        (self.test_path / "merge_fail" / "Subs").mkdir()
+        (self.test_path / "merge_fail" / "Subs" / "English.srt").write_text(
+            "sub"
+        )
+
+        (self.migrated_path / "merge_fail").mkdir()
+        (self.migrated_path / "merge_fail" / "movie.mkv").touch()
+        (self.migrated_path / "merge_fail" / "Subs").write_text("not a dir")
+        # Subs is a file, so copying Subs/English.srt will fail
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&merge_missing_files=true&delete_source_after_merge=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_merged"], 1)
+        self.assertGreater(data["errors"], 0)
+        self.assertEqual(data["folders_deleted"], 0)
+        self.assertIn("merge_fail", data["merged_folders"])
+        self.assertNotIn("merge_fail", data["deleted_folders"])
+        self.assertTrue((self.test_path / "merge_fail").exists())
+        self.assertTrue(
+            (self.test_path / "merge_fail" / "Subs" / "English.srt").exists()
+        )
+
+    def test_merge_partial_copy_failure_skips_delete(self):
+        """When some files fail to copy, do not delete source."""
+        (self.test_path / "partial_fail").mkdir()
+        (self.test_path / "partial_fail" / "ok.srt").write_text("ok")
+        (self.test_path / "partial_fail" / "Subs").mkdir()
+        (self.test_path / "partial_fail" / "Subs" / "fail.srt").write_text(
+            "fail"
+        )
+
+        (self.migrated_path / "partial_fail").mkdir()
+        (self.migrated_path / "partial_fail" / "movie.mkv").touch()
+        (self.migrated_path / "partial_fail" / "Subs").write_text("blocker")
+        # ok.srt can copy; Subs/fail.srt will fail (Subs is file)
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&merge_missing_files=true&delete_source_after_merge=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_merged"], 1)
+        self.assertGreater(data["files_merged"], 0)
+        self.assertGreater(data["errors"], 0)
+        self.assertEqual(data["folders_deleted"], 0)
+        self.assertTrue((self.test_path / "partial_fail").exists())
+        self.assertTrue(
+            (self.migrated_path / "partial_fail" / "ok.srt").exists()
+        )
+
     def test_migrate_moves_symlink_not_target(self):
         """Test that when migrating a symlink (pointing inside target), the symlink is moved, not its target"""
         client.post("/api/v1/migrate/non-movie-folders?dry_run=false")
