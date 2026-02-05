@@ -698,36 +698,28 @@ async def migrate_non_movie_folders(
                                     f"Deleting source (nothing to merge, "
                                     f"dest has all): {folder_name}"
                                 )
-                                if not dry_run:
-                                    try:
-                                        if folder_path.is_symlink():
-                                            folder_path.unlink()
-                                        else:
-                                            shutil.rmtree(str(folder_path))
-                                        deleted_folders.append(folder_name)
-                                        migrate_folders_deleted_total.labels(
-                                            target_directory=target_dir,
-                                            migrated_directory=migrated_dir,
-                                            dry_run=str(dry_run).lower(),
-                                        ).inc()
-                                    except OSError as e:
-                                        error_msg = (
-                                            f"Failed to delete source: "
-                                            f"{folder_path}: {str(e)}"
-                                        )
-                                        logger.error(error_msg)
-                                        errors.append(error_msg)
-                                        migrate_errors_total.labels(
-                                            target_directory=target_dir,
-                                            migrated_directory=migrated_dir,
-                                            error_type="folder_delete_error",
-                                        ).inc()
-                                else:
+                                try:
+                                    if folder_path.is_symlink():
+                                        folder_path.unlink()
+                                    else:
+                                        shutil.rmtree(str(folder_path))
                                     deleted_folders.append(folder_name)
                                     migrate_folders_deleted_total.labels(
                                         target_directory=target_dir,
                                         migrated_directory=migrated_dir,
                                         dry_run=str(dry_run).lower(),
+                                    ).inc()
+                                except OSError as e:
+                                    error_msg = (
+                                        f"Failed to delete source: "
+                                        f"{folder_path}: {str(e)}"
+                                    )
+                                    logger.error(error_msg)
+                                    errors.append(error_msg)
+                                    migrate_errors_total.labels(
+                                        target_directory=target_dir,
+                                        migrated_directory=migrated_dir,
+                                        error_type="folder_delete_error",
                                     ).inc()
                             else:
                                 logger.info(
