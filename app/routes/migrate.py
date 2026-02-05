@@ -98,22 +98,32 @@ def folder_contains_movie_files(
     return False
 
 
+# Files to ignore when comparing/checking folder contents (e.g. macOS metadata)
+_IGNORE_FILES = {".DS_Store"}
+
+
 def _folder_contains_only_subtitles(
     folder_path: Path, subtitle_extensions: List[str]
 ) -> bool:
     """
     Check if a folder contains only subtitle files (recursively).
 
+    Ignores _IGNORE_FILES (e.g. .DS_Store) so folders with subtitles + metadata
+    are treated as subtitle-only, consistent with _contents_match.
+
     Args:
         folder_path: Path to the folder to check
         subtitle_extensions: List of subtitle file extensions (with leading dot)
 
     Returns:
-        True if all files in the folder are subtitle files, False otherwise
+        True if all non-ignored files in the folder are subtitle files, False
+        otherwise
     """
     try:
         for root, _dirs, files in os.walk(folder_path):
             for name in files:
+                if name in _IGNORE_FILES:
+                    continue
                 p = Path(root) / name
                 if not is_subtitle_file(p, subtitle_extensions):
                     return False
@@ -135,13 +145,13 @@ def _get_files_only_in_source(
     Args:
         source_dir: Source directory path
         dest_dir: Destination directory path
-        ignore_files: Set of filenames to ignore (e.g. .DS_Store)
+        ignore_files: Set of filenames to ignore. Defaults to _IGNORE_FILES.
 
     Returns:
         List of (relative_path_str, source_path) tuples
     """
     if ignore_files is None:
-        ignore_files = {".DS_Store"}
+        ignore_files = _IGNORE_FILES
     try:
         result = []
         for root, _dirs, files in os.walk(source_dir):
@@ -202,12 +212,11 @@ def _contents_match(
     Returns:
         True if same relative paths and file sizes, False otherwise
     """
-    IGNORE_FILES = {".DS_Store"}
     try:
         source_files = {}
         for root, _dirs, files in os.walk(source_dir):
             for name in files:
-                if name in IGNORE_FILES:
+                if name in _IGNORE_FILES:
                     continue
                 p = Path(root) / name
                 rel = p.relative_to(source_dir)
@@ -215,7 +224,7 @@ def _contents_match(
         dest_files = {}
         for root, _dirs, files in os.walk(dest_dir):
             for name in files:
-                if name in IGNORE_FILES:
+                if name in _IGNORE_FILES:
                     continue
                 p = Path(root) / name
                 rel = p.relative_to(dest_dir)
