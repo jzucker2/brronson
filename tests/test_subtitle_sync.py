@@ -80,6 +80,7 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "Subs").mkdir()
         (movie / "Subs" / "en.srt").touch()
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged"
@@ -99,6 +100,7 @@ class TestSubtitleSync(unittest.TestCase):
         movie.mkdir()
         (movie / "sub.srt").touch()
         (self.target_dir / "Movie2").mkdir()
+        (self.target_dir / "Movie2" / "movie.mkv").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=migrated"
@@ -117,6 +119,7 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "Subs").mkdir()
         (movie / "Subs" / "en.srt").write_text("en")
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
@@ -143,6 +146,7 @@ class TestSubtitleSync(unittest.TestCase):
         movie.mkdir()
         (movie / "sub.srt").write_text("sub")
         (self.target_dir / "Some Movie").mkdir()
+        (self.target_dir / "Some Movie" / "movie.mkv").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
@@ -159,6 +163,7 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "Subs").mkdir()
         (movie / "Subs" / "en.srt").write_text("en")
         (self.target_dir / "MovieB").mkdir()
+        (self.target_dir / "MovieB" / "movie.mp4").touch()
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
         )
@@ -177,6 +182,7 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "Subs" / "b.srt").write_text("b")
 
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         (self.target_dir / "Movie1" / "a.srt").write_text("a")
         (self.target_dir / "Movie1" / "Subs").mkdir()
         (self.target_dir / "Movie1" / "Subs" / "b.srt").write_text("b")
@@ -199,6 +205,7 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "Subs").mkdir()
         (movie / "Subs" / "two.srt").write_text("2")
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
@@ -224,6 +231,7 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "Subs" / "also_missing.srt").write_text("also")
 
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         (self.target_dir / "Movie1" / "existing.srt").write_text("keep")
 
         response = client.post(
@@ -264,6 +272,25 @@ class TestSubtitleSync(unittest.TestCase):
         self.assertFalse((self.target_dir / "OrphanMovie").exists())
         self.assertTrue((movie / "en.srt").exists())
 
+    def test_sync_skips_target_when_no_movie_file(self):
+        """When target dir exists but has no movie file, entire folder skipped."""
+        movie = self.salvaged_dir / "NoMovieFile"
+        movie.mkdir()
+        (movie / "en.srt").write_text("x")
+        (self.target_dir / "NoMovieFile").mkdir()
+        (self.target_dir / "NoMovieFile" / "readme.nfo").write_text("nfo")
+        # No .mp4/.mkv etc. in target - only nfo
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["subtitle_files_moved"], 0)
+        self.assertEqual(data["subtitle_files_skipped"], 0)
+        self.assertFalse((self.target_dir / "NoMovieFile" / "en.srt").exists())
+        self.assertTrue((movie / "en.srt").exists())
+
     def test_sync_only_processes_movies_with_target_dir(self):
         """Only movies with matching target dir are processed; others skipped."""
         (self.salvaged_dir / "HasTarget").mkdir()
@@ -271,6 +298,7 @@ class TestSubtitleSync(unittest.TestCase):
         (self.salvaged_dir / "NoTarget").mkdir()
         (self.salvaged_dir / "NoTarget" / "b.srt").write_text("b")
         (self.target_dir / "HasTarget").mkdir()
+        (self.target_dir / "HasTarget" / "movie.mp4").touch()
 
         response = client.post(
             "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
@@ -291,6 +319,7 @@ class TestSubtitleSync(unittest.TestCase):
         (self.salvaged_dir / "Movie1" / "Subs").mkdir()
         (self.salvaged_dir / "Movie1" / "Subs" / "en.srt").write_text("en")
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         # No target/Movie1/Subs yet
 
         response = client.post(
@@ -310,6 +339,7 @@ class TestSubtitleSync(unittest.TestCase):
         (movie / "other.srt").write_text("other")
 
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         (self.target_dir / "Movie1" / "subtitle.srt").write_text("existing")
 
         response = client.post(
@@ -332,6 +362,7 @@ class TestSubtitleSync(unittest.TestCase):
         movie = self.salvaged_dir / "Movie1"
         movie.mkdir()
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         for i in range(5):
             (movie / f"sub{i}.srt").touch()
 
@@ -358,6 +389,7 @@ class TestSubtitleSync(unittest.TestCase):
         movie = self.salvaged_dir / "Movie1"
         movie.mkdir()
         (self.target_dir / "Movie1").mkdir()
+        (self.target_dir / "Movie1" / "movie.mp4").touch()
         (movie / "root.srt").write_text("root")
         (movie / "Subs").mkdir()
         (movie / "Subs" / "a.srt").write_text("a")
@@ -396,6 +428,7 @@ class TestSubtitleSync(unittest.TestCase):
         target_missing = Path(self.test_dir) / "target_missing"
         target_missing.mkdir()
         (target_missing / "Movie1").mkdir()
+        (target_missing / "Movie1" / "movie.mp4").touch()
         os.environ["TARGET_DIRECTORY"] = str(target_missing)
         from importlib import reload
         import app.main
@@ -461,6 +494,7 @@ class TestSubtitleSync(unittest.TestCase):
         (self.salvaged_dir / "Movie1").mkdir()
         (self.salvaged_dir / "Movie1" / "sub.srt").write_text("sub")
         (target_inside / "Movie1").mkdir()
+        (target_inside / "Movie1" / "movie.mp4").touch()
         (target_inside / "existing.srt").write_text("existing")
 
         response = client.post(

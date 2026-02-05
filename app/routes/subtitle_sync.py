@@ -16,7 +16,11 @@ from ..config import (
     get_salvaged_movies_directory,
     get_target_directory,
 )
-from ..helpers import is_subtitle_file, validate_directory
+from ..helpers import (
+    folder_contains_movie_files,
+    is_subtitle_file,
+    validate_directory,
+)
 from ..metrics import (
     sync_subtitles_batch_operations_total,
     sync_subtitles_errors_total,
@@ -67,12 +71,13 @@ async def sync_subtitles_to_target(
     """
     Move subtitle files from source (salvaged or migrated) to target.
 
-    Only processes movie folders that already exist in the target directory.
-    For each such movie, moves subtitle files to the equivalent path (root or
-    Subs/), creating the Subs folder if needed. Skips entire movie folders when
-    no matching directory exists in target (never creates movie directories).
-    Only moves when the destination file does not already exist. Skipped files
-    do not count toward batch_size.
+    Only processes movie folders that already exist in the target directory and
+    contain at least one movie file. For each such movie, moves subtitle files
+    to the equivalent path (root or Subs/), creating the Subs folder if needed.
+    Skips entire movie folders when no matching directory exists in target
+    (never creates movie directories) or when the target directory has no movie
+    file. Only moves when the destination file does not already exist. Skipped
+    files do not count toward batch_size.
 
     Args:
         source: Source of subtitles: "salvaged" or "migrated".
@@ -195,6 +200,11 @@ async def sync_subtitles_to_target(
             if not target_movie_base.is_dir():
                 logger.debug(
                     f"Skipping {rel_base}: no matching movie directory in target"
+                )
+                continue
+            if not folder_contains_movie_files(target_movie_base):
+                logger.debug(
+                    f"Skipping {rel_base}: no movie file in target directory"
                 )
                 continue
 

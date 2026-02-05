@@ -697,7 +697,7 @@ This design ensures that if a first-level folder has no movie files anywhere wit
 
 #### Sync Subtitles to Target Usage
 
-The sync subtitles endpoint moves subtitle files from either the salvaged or migrated movies directory into the target directory. **Only movie folders that already exist in the target are processed** – if there is no matching movie directory in target, the entire folder is skipped (the movie directory is never created). For each matching movie, subtitles are placed at the equivalent path (root or `Subs/`); the `Subs` folder is created if needed. Files are only moved when the destination does not already exist. Skipped items do not count toward `batch_size`, making the operation re-entrant.
+The sync subtitles endpoint moves subtitle files from either the salvaged or migrated movies directory into the target directory. **Only movie folders that already exist in the target and contain at least one movie file are processed** – if there is no matching movie directory in target, or the target directory has no movie file (e.g. only .nfo, .sfv), the entire folder is skipped (the movie directory is never created). For each matching movie, subtitles are placed at the equivalent path (root or `Subs/`); the `Subs` folder is created if needed. Files are only moved when the destination does not already exist. Skipped items do not count toward `batch_size`, making the operation re-entrant.
 
 **Configuration:**
 
@@ -749,6 +749,7 @@ curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salva
 
 - **Source choice**: Query param `source=salvaged` or `source=migrated` selects the subtitle source
 - **Target movie must exist**: Only processes source movie folders that have a matching directory in target; skips entirely when no match (never creates movie directories)
+- **Target must have movie file**: Skips target directories that have no movie file (e.g. only .nfo, .sfv, or empty); prevents syncing subtitles into orphan metadata folders
 - **Equivalent path**: Preserves hierarchy; each file goes to the same relative path under target (e.g. root stays root, Subs/en.srt stays Subs/en.srt); creates `Subs` folder when needed
 - **Skip existing**: Does not overwrite; if a file (or path) already exists in target, it is skipped and not counted toward `batch_size`
 - **Batch processing**: `batch_size` limits how many files are moved per request (default: 100); only actually moved files count
