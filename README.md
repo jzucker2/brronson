@@ -532,6 +532,16 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
 curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&delete_source_if_match=true"
 ```
 
+**Merge missing files when destination exists:**
+
+```bash
+# Copy files from source that are not in destination, then optionally delete source
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&merge_missing_files=true"
+
+# Merge and delete source after copying
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&merge_missing_files=true&delete_source_after_merge=true"
+```
+
 **Response format:**
 
 ```json
@@ -541,10 +551,14 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
   "dry_run": true,
   "batch_size": 100,
   "delete_source_if_match": false,
+  "merge_missing_files": false,
+  "delete_source_after_merge": false,
   "folders_found": 5,
   "folders_moved": 0,
   "folders_skipped": 0,
   "folders_deleted": 0,
+  "folders_merged": 0,
+  "files_merged": 0,
   "errors": 0,
   "batch_limit_reached": false,
   "remaining_folders": 0,
@@ -552,6 +566,7 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
   "moved_folders": [],
   "skipped_folders": [],
   "deleted_folders": [],
+  "merged_folders": [],
   "error_details": []
 }
 ```
@@ -566,9 +581,10 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
 - **Re-entrant**: Can be called multiple times to resume from where it stopped
 - **Skip Existing**: If a destination folder already exists, it is skipped (not overwritten) and logged
 - **Delete Source If Match**: When `delete_source_if_match=true` and destination exists with exact contents (folder contains only subtitles, same structure and file sizes), the source folder is deleted instead of skipped
+- **Merge Missing Files**: When `merge_missing_files=true` and destination exists, copies files from source that are not in destination; use `delete_source_after_merge=true` to remove the source folder after merging
 - **Error Handling**: Comprehensive error reporting for failed moves
 - **Progress Tracking**: `remaining_folders` field shows how many folders still need to be processed
-- **Prometheus Metrics**: Records found, moved, skipped, and error metrics
+- **Prometheus Metrics**: Records found, moved, skipped, merged, deleted, and error metrics
 
 **Movie File Extensions:**
 

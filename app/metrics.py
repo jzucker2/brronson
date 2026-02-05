@@ -250,6 +250,18 @@ migrate_folders_deleted_total = Counter(
     ["target_directory", "migrated_directory", "dry_run"],
 )
 
+migrate_folders_merged_total = Counter(
+    "brronson_migrate_folders_merged_total",
+    "Total number of folders merged (missing files copied to destination)",
+    ["target_directory", "migrated_directory", "dry_run"],
+)
+
+migrate_files_merged_total = Counter(
+    "brronson_migrate_files_merged_total",
+    "Total number of files copied during merge (source to destination)",
+    ["target_directory", "migrated_directory", "dry_run"],
+)
+
 migrate_errors_total = Counter(
     "brronson_migrate_errors_total",
     "Total errors during folder migration operations",

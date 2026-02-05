@@ -510,6 +510,114 @@ class TestNonMovieFolderMigration(unittest.TestCase):
         self.assertTrue(external.exists())
         self.assertTrue((external / "file.txt").exists())
 
+    def test_merge_missing_files_copies_source_files_to_destination(self):
+        """When merge_missing_files=True and dest exists, copy missing files."""
+        (self.test_path / "merge_src").mkdir()
+        (self.test_path / "merge_src" / "Subs").mkdir()
+        (self.test_path / "merge_src" / "Subs" / "English.srt").write_text(
+            "sub content"
+        )
+        (self.test_path / "merge_src" / "Subs" / "dut.srt").write_text(
+            "dutch sub"
+        )
+
+        (self.migrated_path / "merge_src").mkdir()
+        (self.migrated_path / "merge_src" / "movie.mkv").touch()
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&merge_missing_files=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_merged"], 1)
+        self.assertEqual(data["files_merged"], 2)
+        self.assertIn("merge_src", data["merged_folders"])
+
+        self.assertTrue(
+            (
+                self.migrated_path / "merge_src" / "Subs" / "English.srt"
+            ).exists()
+        )
+        self.assertTrue(
+            (self.migrated_path / "merge_src" / "Subs" / "dut.srt").exists()
+        )
+        self.assertTrue(
+            (self.migrated_path / "merge_src" / "movie.mkv").exists()
+        )
+        self.assertEqual(
+            (
+                self.migrated_path / "merge_src" / "Subs" / "English.srt"
+            ).read_text(),
+            "sub content",
+        )
+        self.assertTrue((self.test_path / "merge_src").exists())
+
+    def test_merge_missing_files_delete_source_after_merge(self):
+        """When delete_source_after_merge=True, delete source after copying."""
+        (self.test_path / "merge_then_del").mkdir()
+        (self.test_path / "merge_then_del" / "en.srt").write_text("sub")
+
+        (self.migrated_path / "merge_then_del").mkdir()
+        (self.migrated_path / "merge_then_del" / "movie.mkv").touch()
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&merge_missing_files=true&delete_source_after_merge=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_merged"], 1)
+        self.assertEqual(data["folders_deleted"], 1)
+        self.assertIn("merge_then_del", data["merged_folders"])
+        self.assertIn("merge_then_del", data["deleted_folders"])
+
+        self.assertTrue(
+            (self.migrated_path / "merge_then_del" / "en.srt").exists()
+        )
+        self.assertFalse((self.test_path / "merge_then_del").exists())
+
+    def test_merge_missing_files_skips_when_no_files_to_merge(self):
+        """When dest has all source files, skip (no merge)."""
+        (self.test_path / "no_merge").mkdir()
+        (self.test_path / "no_merge" / "en.srt").write_text("x")
+
+        (self.migrated_path / "no_merge").mkdir()
+        (self.migrated_path / "no_merge" / "en.srt").write_text("x")
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&merge_missing_files=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_merged"], 0)
+        self.assertEqual(data["files_merged"], 0)
+        self.assertGreater(data["folders_skipped"], 0)
+        self.assertIn("no_merge", data["skipped_folders"])
+
+    def test_merge_missing_files_dry_run(self):
+        """Dry run reports would merge without copying."""
+        (self.test_path / "dry_merge").mkdir()
+        (self.test_path / "dry_merge" / "extra.srt").write_text("extra")
+
+        (self.migrated_path / "dry_merge").mkdir()
+        (self.migrated_path / "dry_merge" / "movie.mkv").touch()
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=true"
+            "&merge_missing_files=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_merged"], 1)
+        self.assertEqual(data["files_merged"], 1)
+        self.assertIn("dry_merge", data["merged_folders"])
+        self.assertFalse(
+            (self.migrated_path / "dry_merge" / "extra.srt").exists()
+        )
+        self.assertTrue((self.test_path / "dry_merge").exists())
+
     def test_migrate_moves_symlink_not_target(self):
         """Test that when migrating a symlink (pointing inside target), the symlink is moved, not its target"""
         client.post("/api/v1/migrate/non-movie-folders?dry_run=false")
