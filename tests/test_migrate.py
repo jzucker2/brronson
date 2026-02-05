@@ -649,6 +649,50 @@ class TestNonMovieFolderMigration(unittest.TestCase):
             (self.migrated_path / "redundant_src" / "movie.mkv").exists()
         )
 
+    def test_all_delete_params_combined(self):
+        """All delete/merge params work together: exact match, merge, nothing."""
+        client.post("/api/v1/migrate/non-movie-folders?dry_run=false")
+
+        # 1. Exact match: delete_source_if_match deletes (takes precedence)
+        (self.test_path / "exact_match").mkdir()
+        (self.test_path / "exact_match" / "en.srt").write_text("x")
+        (self.migrated_path / "exact_match").mkdir()
+        (self.migrated_path / "exact_match" / "en.srt").write_text("x")
+
+        # 2. Nothing to merge: delete_source_when_nothing_to_merge deletes
+        (self.test_path / "redundant").mkdir()
+        (self.test_path / "redundant" / "en.srt").write_text("x")
+        (self.migrated_path / "redundant").mkdir()
+        (self.migrated_path / "redundant" / "movie.mkv").touch()
+        (self.migrated_path / "redundant" / "en.srt").write_text("x")
+
+        # 3. Files to merge: merge copies, source kept (no delete_source_after)
+        (self.test_path / "has_extra").mkdir()
+        (self.test_path / "has_extra" / "Subs").mkdir()
+        (self.test_path / "has_extra" / "Subs" / "extra.srt").write_text("e")
+        (self.migrated_path / "has_extra").mkdir()
+        (self.migrated_path / "has_extra" / "movie.mkv").touch()
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&delete_source_if_match=true"
+            "&merge_missing_files=true"
+            "&delete_source_when_nothing_to_merge=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_deleted"], 2)
+        self.assertEqual(data["folders_merged"], 1)
+        self.assertIn("exact_match", data["deleted_folders"])
+        self.assertIn("redundant", data["deleted_folders"])
+        self.assertIn("has_extra", data["merged_folders"])
+        self.assertFalse((self.test_path / "exact_match").exists())
+        self.assertFalse((self.test_path / "redundant").exists())
+        self.assertTrue((self.test_path / "has_extra").exists())
+        self.assertTrue(
+            (self.migrated_path / "has_extra" / "Subs" / "extra.srt").exists()
+        )
+
     def test_delete_source_when_nothing_to_merge_dry_run(self):
         """Dry run reports would delete when nothing to merge."""
         (self.test_path / "would_del_redundant").mkdir()
