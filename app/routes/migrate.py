@@ -495,10 +495,29 @@ async def migrate_non_movie_folders(
                                     error_type="folder_delete_error",
                                 ).inc()
                         else:
-                            logger.info(
-                                f"Skipping folder (destination exists): "
-                                f"{folder_name} -> {target_migrated_path}"
-                            )
+                            if delete_source_if_match:
+                                reason = "not only subtitles"
+                                if _folder_contains_only_subtitles(
+                                    folder_path, DEFAULT_SUBTITLE_EXTENSIONS
+                                ):
+                                    reason = (
+                                        "contents differ"
+                                        if not _contents_match(
+                                            folder_path,
+                                            target_migrated_path,
+                                        )
+                                        else "unknown"
+                                    )
+                                logger.info(
+                                    f"Skipping folder (destination exists, "
+                                    f"delete_source_if_match: {reason}): "
+                                    f"{folder_name} -> {target_migrated_path}"
+                                )
+                            else:
+                                logger.info(
+                                    f"Skipping folder (destination exists): "
+                                    f"{folder_name} -> {target_migrated_path}"
+                                )
                             skipped_folders.append(folder_name)
                             migrate_folders_skipped_total.labels(
                                 target_directory=target_dir,
