@@ -626,6 +626,49 @@ class TestNonMovieFolderMigration(unittest.TestCase):
         self.assertGreater(data["folders_skipped"], 0)
         self.assertIn("no_merge", data["skipped_folders"])
 
+    def test_delete_source_when_nothing_to_merge(self):
+        """When nothing to merge (source subset), delete source if requested."""
+        (self.test_path / "redundant_src").mkdir()
+        (self.test_path / "redundant_src" / "en.srt").write_text("x")
+
+        (self.migrated_path / "redundant_src").mkdir()
+        (self.migrated_path / "redundant_src" / "movie.mkv").touch()
+        (self.migrated_path / "redundant_src" / "en.srt").write_text("x")
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&merge_missing_files=true"
+            "&delete_source_when_nothing_to_merge=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_deleted"], 1)
+        self.assertIn("redundant_src", data["deleted_folders"])
+        self.assertFalse((self.test_path / "redundant_src").exists())
+        self.assertTrue(
+            (self.migrated_path / "redundant_src" / "movie.mkv").exists()
+        )
+
+    def test_delete_source_when_nothing_to_merge_dry_run(self):
+        """Dry run reports would delete when nothing to merge."""
+        (self.test_path / "would_del_redundant").mkdir()
+        (self.test_path / "would_del_redundant" / "en.srt").write_text("x")
+
+        (self.migrated_path / "would_del_redundant").mkdir()
+        (self.migrated_path / "would_del_redundant" / "movie.mkv").touch()
+        (self.migrated_path / "would_del_redundant" / "en.srt").write_text("x")
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=true"
+            "&merge_missing_files=true"
+            "&delete_source_when_nothing_to_merge=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["folders_deleted"], 1)
+        self.assertIn("would_del_redundant", data["deleted_folders"])
+        self.assertTrue((self.test_path / "would_del_redundant").exists())
+
     def test_merge_missing_files_dry_run(self):
         """Dry run reports would merge without copying."""
         (self.test_path / "dry_merge").mkdir()

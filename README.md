@@ -540,6 +540,9 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
 
 # Merge and delete source after copying
 curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&merge_missing_files=true&delete_source_after_merge=true"
+
+# Delete redundant source when nothing to merge (dest has all, source is subset)
+curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=false&merge_missing_files=true&delete_source_when_nothing_to_merge=true"
 ```
 
 **Response format:**
@@ -553,6 +556,7 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
   "delete_source_if_match": false,
   "merge_missing_files": false,
   "delete_source_after_merge": false,
+  "delete_source_when_nothing_to_merge": false,
   "folders_found": 5,
   "folders_moved": 0,
   "folders_skipped": 0,
@@ -582,6 +586,7 @@ curl -X POST "http://localhost:1968/api/v1/migrate/non-movie-folders?dry_run=fal
 - **Skip Existing**: If a destination folder already exists, it is skipped (not overwritten) and logged
 - **Delete Source If Match**: When `delete_source_if_match=true` and destination exists with exact contents (folder contains only subtitles, same structure and file sizes), the source folder is deleted instead of skipped
 - **Merge Missing Files**: When `merge_missing_files=true` and destination exists, copies files from source that are not in destination; use `delete_source_after_merge=true` to remove the source folder after merging
+- **Delete Source When Nothing To Merge**: When `merge_missing_files=true` and destination exists with no files to copy (source is subset or empty), use `delete_source_when_nothing_to_merge=true` to remove the redundant source folder
 - **Error Handling**: Comprehensive error reporting for failed moves
 - **Progress Tracking**: `remaining_folders` field shows how many folders still need to be processed
 - **Prometheus Metrics**: Records found, moved, skipped, merged, deleted, and error metrics
