@@ -597,6 +597,12 @@ async def migrate_non_movie_folders(
                         f"DRY RUN: Would move folder: {folder_name} "
                         f"-> {target_migrated_path}"
                     )
+                    moved_folders.append(folder_name)
+                    migrate_folders_moved_total.labels(
+                        target_directory=target_dir,
+                        migrated_directory=migrated_dir,
+                        dry_run=str(dry_run).lower(),
+                    ).inc()
 
         # Record metrics for found folders
         migrate_folders_found_total.labels(

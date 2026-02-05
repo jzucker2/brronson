@@ -97,9 +97,11 @@ class TestNonMovieFolderMigration(unittest.TestCase):
 
         self.assertTrue(data["dry_run"])
         self.assertGreater(data["folders_found"], 0)
-        self.assertEqual(data["folders_moved"], 0)  # Dry run doesn't move
+        self.assertGreater(
+            data["folders_moved"], 0
+        )  # Reports what would be moved
 
-        # Verify folders still exist (dry run)
+        # Verify folders still exist (dry run doesn't actually move)
         self.assertTrue((self.test_path / "only_subtitles").exists())
         self.assertTrue((self.test_path / "only_text").exists())
         self.assertTrue(
