@@ -128,6 +128,10 @@ def _get_files_only_in_source(
     """
     Get list of (relative_path, source_path) for files in source but not in dest.
 
+    Uses dest_path.exists() to check presence, so case-insensitive filesystems
+    (macOS, Windows) correctly treat differently-cased paths as the same file
+    and avoid overwriting.
+
     Args:
         source_dir: Source directory path
         dest_dir: Destination directory path
@@ -139,14 +143,6 @@ def _get_files_only_in_source(
     if ignore_files is None:
         ignore_files = {".DS_Store"}
     try:
-        dest_files = set()
-        for root, _dirs, files in os.walk(dest_dir):
-            for name in files:
-                if name in ignore_files:
-                    continue
-                p = Path(root) / name
-                rel = p.relative_to(dest_dir)
-                dest_files.add(str(rel))
         result = []
         for root, _dirs, files in os.walk(source_dir):
             for name in files:
@@ -154,7 +150,8 @@ def _get_files_only_in_source(
                     continue
                 p = Path(root) / name
                 rel = p.relative_to(source_dir)
-                if str(rel) not in dest_files:
+                dest_path = dest_dir / rel
+                if not dest_path.exists():
                     result.append((str(rel), p))
         return result
     except (ValueError, OSError):

@@ -15,6 +15,17 @@ from tests.test_utils import (
 client = TestClient(app)
 
 
+def _is_case_insensitive(path: Path) -> bool:
+    """Return True if the filesystem at path is case-insensitive."""
+    try:
+        (path / "case_check_a").touch()
+        result = (path / "case_check_A").exists()
+        (path / "case_check_a").unlink()
+        return result
+    except OSError:
+        return False
+
+
 class TestNonMovieFolderMigration(unittest.TestCase):
     """Test the non-movie folder migration functionality"""
 
@@ -675,6 +686,50 @@ class TestNonMovieFolderMigration(unittest.TestCase):
         self.assertTrue(
             (self.migrated_path / "partial_fail" / "ok.srt").exists()
         )
+
+    def test_merge_case_insensitive_skips_existing_different_casing(self):
+        """On case-insensitive FS, dest with different casing is not overwritten."""
+        (self.test_path / "case_merge").mkdir()
+        (self.test_path / "case_merge" / "Subs").mkdir()
+        (self.test_path / "case_merge" / "Subs" / "English.srt").write_text(
+            "from source"
+        )
+
+        (self.migrated_path / "case_merge").mkdir()
+        (self.migrated_path / "case_merge" / "movie.mkv").touch()
+        (self.migrated_path / "case_merge" / "subs").mkdir()
+        (
+            self.migrated_path / "case_merge" / "subs" / "english.srt"
+        ).write_text("existing in dest")
+
+        response = client.post(
+            "/api/v1/migrate/non-movie-folders?dry_run=false"
+            "&merge_missing_files=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        if _is_case_insensitive(self.test_path):
+            self.assertEqual(
+                data["files_merged"],
+                0,
+                "Should not overwrite on case-insensitive FS",
+            )
+            dest_content = (
+                self.migrated_path / "case_merge" / "subs" / "english.srt"
+            ).read_text()
+            self.assertEqual(
+                dest_content,
+                "existing in dest",
+                "Dest file must not be overwritten",
+            )
+        else:
+            self.assertEqual(data["files_merged"], 1)
+            self.assertTrue(
+                (
+                    self.migrated_path / "case_merge" / "Subs" / "English.srt"
+                ).exists()
+            )
 
     def test_migrate_moves_symlink_not_target(self):
         """Test that when migrating a symlink (pointing inside target), the symlink is moved, not its target"""
