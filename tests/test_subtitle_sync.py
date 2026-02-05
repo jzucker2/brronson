@@ -272,6 +272,63 @@ class TestSubtitleSync(unittest.TestCase):
         self.assertFalse((self.target_dir / "OrphanMovie").exists())
         self.assertTrue((movie / "en.srt").exists())
 
+    def test_sync_include_metadata_files(self):
+        """When include_metadata_files=True, also moves .nfo, .sfv, .jpg."""
+        movie = self.salvaged_dir / "MovieWithMeta"
+        movie.mkdir()
+        (movie / "en.srt").write_text("sub")
+        (movie / "movie.nfo").write_text("nfo content")
+        (movie / "movie.sfv").write_text("sfv content")
+        (movie / "poster.jpg").write_text("poster")
+        (self.target_dir / "MovieWithMeta").mkdir()
+        (self.target_dir / "MovieWithMeta" / "movie.mp4").touch()
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+            "&include_metadata_files=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["include_metadata_files"])
+        self.assertEqual(data["subtitle_files_moved"], 4)
+        self.assertEqual(
+            (self.target_dir / "MovieWithMeta" / "en.srt").read_text(),
+            "sub",
+        )
+        self.assertEqual(
+            (self.target_dir / "MovieWithMeta" / "movie.nfo").read_text(),
+            "nfo content",
+        )
+        self.assertEqual(
+            (self.target_dir / "MovieWithMeta" / "movie.sfv").read_text(),
+            "sfv content",
+        )
+        self.assertEqual(
+            (self.target_dir / "MovieWithMeta" / "poster.jpg").read_text(),
+            "poster",
+        )
+
+    def test_sync_excludes_metadata_files_by_default(self):
+        """By default, only subtitles are moved; .nfo, .sfv stay in source."""
+        movie = self.salvaged_dir / "MovieMetaDefault"
+        movie.mkdir()
+        (movie / "en.srt").write_text("sub")
+        (movie / "movie.nfo").write_text("nfo")
+        (self.target_dir / "MovieMetaDefault").mkdir()
+        (self.target_dir / "MovieMetaDefault" / "movie.mp4").touch()
+
+        response = client.post(
+            "/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data.get("include_metadata_files", False))
+        self.assertEqual(data["subtitle_files_moved"], 1)
+        self.assertTrue((movie / "movie.nfo").exists())
+        self.assertFalse(
+            (self.target_dir / "MovieMetaDefault" / "movie.nfo").exists()
+        )
+
     def test_sync_skips_target_when_no_movie_file(self):
         """When target dir exists but has no movie file, entire folder skipped."""
         movie = self.salvaged_dir / "NoMovieFile"

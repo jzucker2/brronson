@@ -726,8 +726,15 @@ curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=migra
 **Use batch_size for re-entrant operations:**
 
 ```bash
-# Move up to 50 subtitle files per request (skipped files don't count)
+# Move up to 50 files per request (skipped files don't count)
 curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false&batch_size=50"
+```
+
+**Include metadata files (.nfo, .sfv, .jpg, etc.):**
+
+```bash
+# Also move .nfo, .sfv, .srr, .jpg, .png, .gif in addition to subtitles
+curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salvaged&dry_run=false&include_metadata_files=true"
 ```
 
 **Response format:**
@@ -740,6 +747,7 @@ curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salva
   "dry_run": true,
   "batch_size": 100,
   "subtitle_extensions": [".srt", ".sub", ".vtt", ...],
+  "include_metadata_files": false,
   "subtitle_files_moved": 0,
   "subtitle_files_skipped": 0,
   "moved_files": [],
@@ -753,6 +761,7 @@ curl -X POST "http://localhost:1968/api/v1/sync/subtitles-to-target?source=salva
 **Features:**
 
 - **Source choice**: Query param `source=salvaged` or `source=migrated` selects the subtitle source
+- **Include metadata files**: When `include_metadata_files=true`, also moves .nfo, .sfv, .srr, .jpg, .png, .gif in addition to subtitles
 - **Target movie must exist**: Only processes source movie folders that have a matching directory in target; skips entirely when no match (never creates movie directories)
 - **Target must have movie file**: Skips target directories that have no movie file (e.g. only .nfo, .sfv, or empty); prevents syncing subtitles into orphan metadata folders
 - **Equivalent path**: Preserves hierarchy; each file goes to the same relative path under target (e.g. root stays root, Subs/en.srt stays Subs/en.srt); creates `Subs` folder when needed
