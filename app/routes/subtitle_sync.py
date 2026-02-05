@@ -67,11 +67,12 @@ async def sync_subtitles_to_target(
     """
     Move subtitle files from source (salvaged or migrated) to target.
 
-    Scans the chosen source movies directory and moves subtitle files into the
-    target directory under each movie folder, preserving the same hierarchy
-    (equivalent path: source/Movie/Subs/en.srt -> target/Movie/Subs/en.srt).
-    Only moves when the destination file does not already exist. Creates
-    directories as needed. Skipped files do not count toward batch_size.
+    Only processes movie folders that already exist in the target directory.
+    For each such movie, moves subtitle files to the equivalent path (root or
+    Subs/), creating the Subs folder if needed. Skips entire movie folders when
+    no matching directory exists in target (never creates movie directories).
+    Only moves when the destination file does not already exist. Skipped files
+    do not count toward batch_size.
 
     Args:
         source: Source of subtitles: "salvaged" or "migrated".
@@ -189,12 +190,17 @@ async def sync_subtitles_to_target(
                 batch_limit_hit = True
                 break
 
+            rel_base = movie_folder.name
+            target_movie_base = target_path / rel_base
+            if not target_movie_base.is_dir():
+                logger.debug(
+                    f"Skipping {rel_base}: no matching movie directory in target"
+                )
+                continue
+
             subtitle_files = _collect_subtitle_files(
                 movie_folder, subtitle_extensions
             )
-            rel_base = movie_folder.name
-            target_movie_base = target_path / rel_base
-
             for src_file in subtitle_files:
                 if files_moved >= batch_size:
                     batch_limit_hit = True
