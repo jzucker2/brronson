@@ -120,13 +120,16 @@ def _folder_contains_only_subtitles(
     return True
 
 
-def _contents_match(source_dir: Path, dest_dir: Path) -> bool:
+def _contents_match(
+    source_dir: Path, dest_dir: Path, log_mismatch_prefix: str = None
+) -> bool:
     """
     Check if two directories have identical contents (same structure, file sizes).
 
     Args:
         source_dir: Source directory path
         dest_dir: Destination directory path
+        log_mismatch_prefix: If provided, log reason when mismatch (e.g. folder name)
 
     Returns:
         True if same relative paths and file sizes, False otherwise
@@ -145,12 +148,28 @@ def _contents_match(source_dir: Path, dest_dir: Path) -> bool:
                 rel = p.relative_to(dest_dir)
                 dest_files[str(rel)] = p.stat().st_size
         if set(source_files.keys()) != set(dest_files.keys()):
+            if log_mismatch_prefix:
+                only_src = set(source_files.keys()) - set(dest_files.keys())
+                only_dest = set(dest_files.keys()) - set(source_files.keys())
+                logger.info(
+                    f"{log_mismatch_prefix}: file set differs - "
+                    f"only in source: {sorted(only_src)[:5]}{'...' if len(only_src) > 5 else ''}, "
+                    f"only in dest: {sorted(only_dest)[:5]}{'...' if len(only_dest) > 5 else ''}"
+                )
             return False
         for rel, size in source_files.items():
-            if dest_files.get(rel) != size:
+            dest_size = dest_files.get(rel)
+            if dest_size != size:
+                if log_mismatch_prefix:
+                    logger.info(
+                        f"{log_mismatch_prefix}: size differs for {rel}: "
+                        f"source={size}, dest={dest_size}"
+                    )
                 return False
         return True
-    except (ValueError, OSError):
+    except (ValueError, OSError) as e:
+        if log_mismatch_prefix:
+            logger.info(f"{log_mismatch_prefix}: compare failed: {e}")
         return False
 
 
@@ -464,7 +483,9 @@ async def migrate_non_movie_folders(
                                 folder_path, DEFAULT_SUBTITLE_EXTENSIONS
                             )
                             and _contents_match(
-                                folder_path, target_migrated_path
+                                folder_path,
+                                target_migrated_path,
+                                log_mismatch_prefix=f"{folder_name}",
                             )
                         ):
                             logger.info(
@@ -505,6 +526,7 @@ async def migrate_non_movie_folders(
                                         if not _contents_match(
                                             folder_path,
                                             target_migrated_path,
+                                            log_mismatch_prefix=f"{folder_name}",
                                         )
                                         else "unknown"
                                     )
@@ -588,7 +610,11 @@ async def migrate_non_movie_folders(
                         and _folder_contains_only_subtitles(
                             folder_path, DEFAULT_SUBTITLE_EXTENSIONS
                         )
-                        and _contents_match(folder_path, target_migrated_path)
+                        and _contents_match(
+                            folder_path,
+                            target_migrated_path,
+                            log_mismatch_prefix=f"{folder_name}",
+                        )
                     ):
                         logger.info(
                             f"DRY RUN: Would delete source (exact match): "
