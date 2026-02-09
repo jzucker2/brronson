@@ -199,6 +199,39 @@ class TestMoveNonDuplicateFiles(unittest.TestCase):
         # Verify target-only directory was not affected
         self.assertTrue((self.target_dir / "target_only").exists())
 
+    def test_move_cleanup_removes_yts_bz_jpeg_before_move(self):
+        """Cleanup runs before move; YTS.BZ - Official site.jpg is removed."""
+        import shutil
+
+        if (self.cleanup_dir / "folder_with_yts_bz").exists():
+            shutil.rmtree(self.cleanup_dir / "folder_with_yts_bz")
+        if (self.target_dir / "folder_with_yts_bz").exists():
+            shutil.rmtree(self.target_dir / "folder_with_yts_bz")
+
+        (self.cleanup_dir / "folder_with_yts_bz").mkdir()
+        (self.cleanup_dir / "folder_with_yts_bz" / "movie.mp4").touch()
+        (
+            self.cleanup_dir
+            / "folder_with_yts_bz"
+            / "YTS.BZ - Official site.jpg"
+        ).write_text("jpeg")
+
+        response = client.post(
+            "/api/v1/move/non-duplicates?dry_run=false&batch_size=10"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("cleanup_results", data)
+        self.assertGreater(data["files_moved"], 0)
+
+        moved = self.target_dir / "folder_with_yts_bz"
+        self.assertTrue(moved.exists())
+        self.assertTrue((moved / "movie.mp4").exists())
+        self.assertFalse(
+            (moved / "YTS.BZ - Official site.jpg").exists(),
+            "YTS.BZ jpeg must be removed by cleanup before move",
+        )
+
     def test_move_non_duplicates_batch_processing(self):
         """Test move non-duplicates with custom batch size"""
         # Reset directories to have 2 non-duplicates
