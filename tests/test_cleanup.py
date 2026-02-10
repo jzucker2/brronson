@@ -29,6 +29,8 @@ class TestCleanupEndpoints(unittest.TestCase):
         (self.test_path / "YIFYStatus.com.txt").touch()
         (self.test_path / "YTSProxies.com.txt").touch()
         (self.test_path / "YTSYifyUP123 (TOR).txt").touch()
+        (self.test_path / "YTS.BZ - Official site.jpg").touch()
+        (self.test_path / "YTS.MX - Official site.jpeg").touch()
         (self.test_path / "normal_file.txt").touch()
         (self.test_path / ".DS_Store").touch()
 
@@ -42,6 +44,8 @@ class TestCleanupEndpoints(unittest.TestCase):
         (subdir / "WWW.YIFY-TORRENTS.COM.jpg").touch()
         (subdir / "YTSProxies.com.txt").touch()
         (subdir / "YTSYifyUP123 (TOR).txt").touch()
+        (subdir / "YTS.BZ - Official site.jpg").touch()
+        (subdir / "YTS.MX - Official site.jpeg").touch()
         (subdir / "normal_file.txt").touch()
 
         # Set the environment variable for testing
@@ -84,8 +88,8 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert normalize_path_for_metrics(
             data["directory"]
         ) == normalize_path_for_metrics(self.test_path)
-        assert data["files_found"] == 16  # 16 unwanted files
-        assert len(data["found_files"]) == 16
+        assert data["files_found"] == 20  # 20 unwanted (incl. YTS.BZ, YTS.MX)
+        assert len(data["found_files"]) == 20
         assert "www.YTS.MX.jpg" in str(data["found_files"])
         assert "www.YTS.AM.jpg" in str(data["found_files"])
         assert "www.YTS.LT.jpg" in str(data["found_files"])
@@ -95,6 +99,8 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert "YTSProxies.com.txt" in str(data["found_files"])
         assert ".DS_Store" in str(data["found_files"])
         assert "YTSYifyUP123 (TOR).txt" in str(data["found_files"])
+        assert "YTS.BZ - Official site.jpg" in str(data["found_files"])
+        assert "YTS.MX - Official site.jpeg" in str(data["found_files"])
 
     def test_cleanup_dry_run(self):
         """Test cleanup endpoint in dry run mode"""
@@ -103,7 +109,7 @@ class TestCleanupEndpoints(unittest.TestCase):
         data = response.json()
 
         assert data["dry_run"] is True
-        assert data["files_found"] == 16
+        assert data["files_found"] == 20
         assert data["files_removed"] == 0  # No files removed in dry run
 
         # Verify files still exist
@@ -146,8 +152,8 @@ class TestCleanupEndpoints(unittest.TestCase):
         data = response.json()
 
         assert data["dry_run"] is False
-        assert data["files_found"] == 16
-        assert data["files_removed"] == 16
+        assert data["files_found"] == 20
+        assert data["files_removed"] == 20
 
         # Verify files are removed
         assert not (self.test_path / "www.YTS.MX.jpg").exists()
@@ -156,6 +162,8 @@ class TestCleanupEndpoints(unittest.TestCase):
         assert not (self.test_path / "WWW.YTS.AG.jpg").exists()
         assert not (self.test_path / "WWW.YIFY-TORRENTS.COM.jpg").exists()
         assert not (self.test_path / "YIFYStatus.com.txt").exists()
+        assert not (self.test_path / "YTS.BZ - Official site.jpg").exists()
+        assert not (self.test_path / "YTS.MX - Official site.jpeg").exists()
 
         # Check metrics for actual removal
         metrics_response = client.get("/metrics")

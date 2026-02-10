@@ -8,6 +8,7 @@ DEFAULT_UNWANTED_PATTERNS = [
     r"www\.YTS\.AM\.jpg$",
     r"www\.YTS\.LT\.jpg$",
     r"WWW\.YTS\.[A-Z]+\.jpg$",
+    r"YTS\.[A-Za-z0-9]+.*\.(jpg|jpeg)$",
     r"WWW\.YIFY-TORRENTS\.COM\.jpg$",
     r"YIFYStatus\.com\.txt$",
     r"YTSProxies\.com\.txt$",
